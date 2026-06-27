@@ -65,6 +65,10 @@ au navigateur.
 - `netlify/functions/db-health.ts` : vérifie la connexion.
 - `netlify/functions/summary.ts` : expose un résumé agrégé.
 
+Les variables `VITE_*` sont publiques par définition dans Vite. `netlify.toml` les exclut donc du
+scan de secrets Netlify via `SECRETS_SCAN_OMIT_KEYS`, tout en laissant les vraies variables serveur
+comme `DATABASE_URL` et `DATABASE_READONLY_URL` protégées par le scan.
+
 ## Roadmap
 
 1. Fondation : projet Vite, thème, layout, navigation, PWA.
