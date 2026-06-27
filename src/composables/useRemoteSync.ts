@@ -54,6 +54,8 @@ export const useRemoteSync = () => {
           const savedState = pulled.snapshot.stores[store.$id]
           if (savedState) store.$patch(savedState)
         }
+      } else if (pulled.ok) {
+        await remoteSyncService.push(createSnapshot(stores))
       }
 
       await nextTick()

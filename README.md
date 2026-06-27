@@ -33,7 +33,7 @@ services isole déjà le stockage pour ajouter plus tard Supabase, Firebase ou u
 - Export JSON, export CSV et import JSON.
 - Notifications/toasts et thème clair/sombre/auto.
 - PostgreSQL Netlify configuré côté serveur avec schéma SQL, healthcheck, endpoint résumé et
-  synchronisation des données applicatives.
+  synchronisation des données applicatives dans les tables métiers.
 
 ## Commandes
 
@@ -61,9 +61,17 @@ au navigateur.
 - `VITE_SYNC_ENABLED=true` et `VITE_SYNC_PROVIDER=postgres` : activent la synchronisation du
   navigateur vers PostgreSQL via Netlify Functions.
 - `database/schema.sql` : schéma principal.
-- `netlify/functions/app-data.ts` : lit/écrit le snapshot applicatif dans PostgreSQL.
+- `netlify/functions/app-data.ts` : lit/écrit les stores dans les tables PostgreSQL normalisées
+  (`accounts`, `categories`, `transactions`, `budgets`, `goals`, `subscriptions`, `debts`,
+  `settings`, `app_users`).
 - `netlify/functions/db-health.ts` : vérifie la connexion.
 - `netlify/functions/summary.ts` : expose un résumé agrégé.
+
+La synchronisation est automatique :
+
+- si PostgreSQL contient déjà des données, elles hydratent les stores Pinia puis le `localStorage` ;
+- si PostgreSQL est vide, l'état local est envoyé en base au démarrage ;
+- ensuite chaque changement local est sauvegardé dans les tables PostgreSQL via Netlify Functions.
 
 Les variables `VITE_*` sont publiques par définition dans Vite. `netlify.toml` les exclut donc du
 scan de secrets Netlify via `SECRETS_SCAN_OMIT_KEYS`, tout en laissant les vraies variables serveur

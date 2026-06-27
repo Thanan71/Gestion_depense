@@ -54,10 +54,31 @@ try {
   const { handler } = require(bundledFunction)
   const previous = await callFunction(handler, 'GET')
   const verificationId = `expense-db-verify-${Date.now()}`
+  const now = new Date().toISOString()
   const snapshot = {
-    version: 1,
-    exportedAt: new Date().toISOString(),
+    version: 2,
+    exportedAt: now,
     stores: {
+      accounts: {
+        accounts: [{ id: 'current', name: 'Compte courant', type: 'bank', balance: 0 }]
+      },
+      categories: {
+        categories: [{ id: 'misc', name: 'Divers', icon: 'Boxes', color: '#475569' }]
+      },
+      budgets: {
+        budgets: [
+          {
+            id: `budget-db-verify-${Date.now()}`,
+            name: 'Budget vérification',
+            amount: 500,
+            period: 'monthly',
+            categoryId: 'misc',
+            alertThreshold: 80,
+            createdAt: now,
+            updatedAt: now
+          }
+        ]
+      },
       expenses: {
         expenses: [
           {
@@ -74,34 +95,126 @@ try {
             tags: ['verification'],
             recurrence: 'none',
             archived: false,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: now,
+            updatedAt: now
           }
         ],
         query: '',
         categoryFilter: 'all',
         periodFilter: 'month'
+      },
+      income: { income: [] },
+      goals: {
+        goals: [
+          {
+            id: `goal-db-verify-${Date.now()}`,
+            name: 'Objectif vérification',
+            targetAmount: 1000,
+            currentAmount: 100,
+            icon: 'Target',
+            createdAt: now,
+            updatedAt: now
+          }
+        ]
+      },
+      subscriptions: {
+        subscriptions: [
+          {
+            id: `subscription-db-verify-${Date.now()}`,
+            name: 'Abonnement vérification',
+            amount: 9.99,
+            renewalDate: new Date().toISOString().slice(0, 10),
+            recurrence: 'monthly',
+            notifyBeforeDays: 1,
+            categoryId: 'misc',
+            createdAt: now,
+            updatedAt: now
+          }
+        ]
+      },
+      debts: {
+        debts: [
+          {
+            id: `debt-db-verify-${Date.now()}`,
+            person: 'Vérification',
+            amount: 25,
+            direction: 'owed_to_me',
+            history: [{ date: new Date().toISOString().slice(0, 10), amount: 25, note: 'Test' }],
+            createdAt: now,
+            updatedAt: now
+          }
+        ]
+      },
+      settings: {
+        settings: {
+          currency: 'EUR',
+          locale: 'fr-FR',
+          theme: 'auto',
+          dateFormat: 'DD/MM/YYYY',
+          weekStartsOn: 1,
+          notifications: {
+            budgetExceeded: true,
+            newExpense: true,
+            goalReached: true,
+            subscriptionTomorrow: true
+          },
+          dashboardWidgets: ['balance']
+        }
       }
     }
   }
 
   await callFunction(handler, 'PUT', snapshot)
 
-  const { rows } = await pool.query(
-    "select data #>> '{stores,expenses,expenses,0,id}' as expense_id from app_snapshots where id = 'default'"
-  )
+  const { rows } = await pool.query('select id, title, kind from transactions where id = $1', [
+    verificationId
+  ])
 
-  if (rows[0]?.expense_id !== verificationId) {
+  if (rows[0]?.id !== verificationId || rows[0]?.kind !== 'expense') {
     throw new Error('The simulated site action was not found in PostgreSQL.')
+  }
+
+  const tableChecks = await pool.query(`
+    select
+      (select count(*)::int from app_users) as app_users,
+      (select count(*)::int from accounts) as accounts,
+      (select count(*)::int from categories) as categories,
+      (select count(*)::int from budgets) as budgets,
+      (select count(*)::int from transactions) as transactions,
+      (select count(*)::int from goals) as goals,
+      (select count(*)::int from subscriptions) as subscriptions,
+      (select count(*)::int from debts) as debts,
+      (select count(*)::int from settings) as settings
+  `)
+
+  const missingTables = Object.entries(tableChecks.rows[0])
+    .filter(([, count]) => Number(count) < 1)
+    .map(([table]) => table)
+
+  if (missingTables.length) {
+    throw new Error(`The sync did not write every expected table: ${missingTables.join(', ')}`)
   }
 
   if (previous.snapshot) {
     await callFunction(handler, 'PUT', previous.snapshot)
   } else {
-    await pool.query("delete from app_snapshots where id = 'default'")
+    await callFunction(handler, 'PUT', {
+      version: 2,
+      exportedAt: new Date().toISOString(),
+      stores: {
+        accounts: { accounts: [] },
+        categories: { categories: [] },
+        budgets: { budgets: [] },
+        expenses: { expenses: [], query: '', categoryFilter: 'all', periodFilter: 'month' },
+        income: { income: [] },
+        goals: { goals: [] },
+        subscriptions: { subscriptions: [] },
+        debts: { debts: [] }
+      }
+    })
   }
 
-  console.log(`Site action persisted in PostgreSQL via Netlify Function: ${verificationId}`)
+  console.log(`Site action persisted in PostgreSQL normalized tables: ${verificationId}`)
 } finally {
   await pool.end()
   await rm(tempDir, { recursive: true, force: true })
