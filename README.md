@@ -32,7 +32,8 @@ services isole déjà le stockage pour ajouter plus tard Supabase, Firebase ou u
 - Calendrier consolidé dépenses, revenus, budgets, objectifs et abonnements.
 - Export JSON, export CSV et import JSON.
 - Notifications/toasts et thème clair/sombre/auto.
-- PostgreSQL Netlify configuré côté serveur avec schéma SQL, healthcheck et endpoint résumé.
+- PostgreSQL Netlify configuré côté serveur avec schéma SQL, healthcheck, endpoint résumé et
+  synchronisation des données applicatives.
 
 ## Commandes
 
@@ -57,7 +58,10 @@ au navigateur.
 
 - `DATABASE_READONLY_URL` : utilisée pour les healthchecks et lectures serverless.
 - `DATABASE_URL` : utilisée pour les migrations et futures écritures.
+- `VITE_SYNC_ENABLED=true` et `VITE_SYNC_PROVIDER=postgres` : activent la synchronisation du
+  navigateur vers PostgreSQL via Netlify Functions.
 - `database/schema.sql` : schéma principal.
+- `netlify/functions/app-data.ts` : lit/écrit le snapshot applicatif dans PostgreSQL.
 - `netlify/functions/db-health.ts` : vérifie la connexion.
 - `netlify/functions/summary.ts` : expose un résumé agrégé.
 

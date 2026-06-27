@@ -99,6 +99,13 @@ create table if not exists settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists app_snapshots (
+  id text primary key default 'default',
+  data jsonb not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists transactions_kind_date_idx on transactions(kind, date desc);
 create index if not exists transactions_category_idx on transactions(category_id);
 create index if not exists budgets_category_idx on budgets(category_id);

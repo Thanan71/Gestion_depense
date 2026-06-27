@@ -99,7 +99,7 @@ const hasWidget = (widget: string) =>
             <ReceiptText :size="22" />
             <div>
               <strong>{{ expenseStore.recentExpenses.length }} opérations récentes</strong>
-              <div class="muted">Les données sont persistées dans le navigateur.</div>
+              <div class="muted">Les données sont sauvegardées en local puis synchronisées.</div>
             </div>
             <span />
           </div>
