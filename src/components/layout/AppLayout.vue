@@ -63,6 +63,11 @@ const pageTitle = computed(
 
 const bottomLinks = links.filter((link) => ['/', '/expenses', '/budgets'].includes(link.to))
 
+const isLinkActive = (to: string) => {
+  if (to === '/') return route.path === '/'
+  return route.path === to || route.path.startsWith(`${to}/`)
+}
+
 watch(
   () => route.fullPath,
   () => {
@@ -104,7 +109,13 @@ watch(
       </RouterLink>
 
       <nav class="nav-list" aria-label="Navigation principale">
-        <RouterLink v-for="link in links" :key="link.to" class="nav-link" :to="link.to">
+        <RouterLink
+          v-for="link in links"
+          :key="link.to"
+          class="nav-link"
+          :class="{ 'is-active': isLinkActive(link.to) }"
+          :to="link.to"
+        >
           <component :is="link.icon" aria-hidden="true" />
           <span>{{ link.label }}</span>
         </RouterLink>
@@ -143,15 +154,31 @@ watch(
       </main>
     </div>
     <nav class="mobile-bottom-nav mobile-only" aria-label="Navigation mobile">
-      <RouterLink v-for="link in bottomLinks.slice(0, 2)" :key="link.to" class="bottom-nav-link" :to="link.to">
+      <RouterLink
+        v-for="link in bottomLinks.slice(0, 2)"
+        :key="link.to"
+        class="bottom-nav-link"
+        :class="{ 'is-active': isLinkActive(link.to) }"
+        :to="link.to"
+      >
         <component :is="link.icon" aria-hidden="true" />
         <span>{{ link.label }}</span>
       </RouterLink>
-      <RouterLink class="bottom-nav-link add" to="/expenses/new">
+      <RouterLink
+        class="bottom-nav-link add"
+        :class="{ 'is-active': route.path === '/expenses/new' }"
+        to="/expenses/new"
+      >
         <Flag aria-hidden="true" />
         <span>Ajouter</span>
       </RouterLink>
-      <RouterLink v-for="link in bottomLinks.slice(2)" :key="link.to" class="bottom-nav-link" :to="link.to">
+      <RouterLink
+        v-for="link in bottomLinks.slice(2)"
+        :key="link.to"
+        class="bottom-nav-link"
+        :class="{ 'is-active': isLinkActive(link.to) }"
+        :to="link.to"
+      >
         <component :is="link.icon" aria-hidden="true" />
         <span>{{ link.label }}</span>
       </RouterLink>

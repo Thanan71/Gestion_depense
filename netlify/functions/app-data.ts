@@ -3,7 +3,7 @@ import type { Handler } from '@netlify/functions'
 import type { PoolClient } from 'pg'
 
 import { requireUser, safeJsonParse } from '../../src/server/auth.js'
-import { getReadOnlyPool, getReadWritePool } from '../../src/server/database.js'
+import { getReadWritePool } from '../../src/server/database.js'
 import type {
   Account,
   Budget,
@@ -51,6 +51,35 @@ const timestamp = (value?: string) => value || new Date().toISOString()
 
 const dbIdIfKnown = (userId: string, id: string | undefined, knownIds: Set<string>) =>
   id && knownIds.has(id) ? dbId(userId, id) : null
+
+let appDataSchemaReady: Promise<void> | undefined
+
+const ensureAppDataSchema = () => {
+  appDataSchemaReady ??= getReadWritePool()
+    .query(`
+      create extension if not exists pgcrypto;
+
+      create table if not exists app_data_revisions (
+        user_id uuid primary key references app_users(id) on delete cascade,
+        revision_id text not null,
+        updated_at timestamptz not null default now()
+      );
+
+      create table if not exists app_data_backups (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references app_users(id) on delete cascade,
+        revision_id text,
+        snapshot jsonb not null,
+        created_at timestamptz not null default now()
+      );
+
+      create index if not exists app_data_backups_user_created_idx
+        on app_data_backups(user_id, created_at desc);
+    `)
+    .then(() => undefined)
+
+  return appDataSchemaReady
+}
 
 const getRevision = async (client: PoolClient, userId: string) => {
   const { rows } = await client.query<{ revision_id: string }>(
@@ -119,7 +148,7 @@ const backupCurrentRemoteData = async (
 }
 
 const pullSnapshot = async (userId: string): Promise<AppSnapshot | null> => {
-  const pool = getReadOnlyPool()
+  const pool = getReadWritePool()
   const [
     accounts,
     categories,
@@ -631,6 +660,7 @@ const saveRemoteData = async (client: PoolClient, snapshot: AppSnapshot, userId:
 export const handler: Handler = async (event) => {
   try {
     const user = await requireUser(event)
+    await ensureAppDataSchema()
 
     if (event.httpMethod === 'GET') {
       return json(200, { ok: true, snapshot: await pullSnapshot(user.id) })

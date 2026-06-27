@@ -133,7 +133,7 @@ a {
   height: 18px;
 }
 
-.nav-link.router-link-active {
+.nav-link.is-active {
   background: var(--surface-soft);
   color: var(--primary-strong);
   font-weight: 700;
@@ -669,12 +669,13 @@ a {
     white-space: nowrap;
   }
 
-  .bottom-nav-link.router-link-active {
+  .bottom-nav-link.is-active {
     background: var(--surface-soft);
     color: var(--primary-strong);
   }
 
-  .bottom-nav-link.add {
+  .bottom-nav-link.add,
+  .bottom-nav-link.add.is-active {
     background: var(--primary);
     color: white;
   }
