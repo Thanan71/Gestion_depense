@@ -8,7 +8,7 @@ test('shows the local-first dashboard', async ({ page }) => {
   await page.getByRole('button', { name: 'Créer un compte' }).click()
   await page.getByLabel('Nom').fill('Utilisateur E2E')
   await page.getByLabel('Email').fill(`e2e-${randomUUID()}@example.test`)
-  await page.getByLabel('Mot de passe').fill('mot-de-passe-e2e')
+  await page.getByLabel('Mot de passe').fill('Mot-de-passe-e2e1')
   await page.getByRole('button', { name: "S'inscrire" }).click()
 
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()

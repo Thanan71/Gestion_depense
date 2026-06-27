@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import dayjs from 'dayjs'
 import {
   Banknote,
   CalendarDays,
@@ -17,6 +16,7 @@ import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 import ExpenseCard from '@/components/expenses/ExpenseCard.vue'
 import { useCurrency } from '@/composables/useCurrency'
 import { useStatistics } from '@/composables/useStatistics'
+import { statisticsService } from '@/services/analytics/statisticsService'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { useExpenseStore } from '@/stores/useExpenseStore'
 import { useGoalStore } from '@/stores/useGoalStore'
@@ -34,22 +34,8 @@ const { formatCurrency } = useCurrency()
 const { monthlyExpenses, monthlyIncome, balance, budgetRemaining, budgetUsedPercent } =
   useStatistics()
 
-const monthFormatter = new Intl.DateTimeFormat(settingsStore.settings.locale, { month: 'short' })
 const monthlyEvolution = computed(() =>
-  Array.from({ length: 6 }, (_, index) => {
-    const month = dayjs().subtract(5 - index, 'month')
-    const monthKey = month.format('YYYY-MM')
-
-    return {
-      label: monthFormatter.format(month.toDate()),
-      expenses: expenseStore.activeExpenses
-        .filter((expense) => expense.date.startsWith(monthKey))
-        .reduce((sum, expense) => sum + expense.amount, 0),
-      income: incomeStore.activeIncome
-        .filter((item) => item.date.startsWith(monthKey))
-        .reduce((sum, item) => sum + item.amount, 0)
-    }
-  })
+  statisticsService.monthlySeries(expenseStore.activeExpenses, incomeStore.activeIncome)
 )
 const chartLabels = computed(() => monthlyEvolution.value.map((item) => item.label))
 const chartDatasets = computed(() => [

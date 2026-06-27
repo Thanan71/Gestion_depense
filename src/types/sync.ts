@@ -10,6 +10,7 @@ export interface AppSnapshot {
 
 export interface RemoteSyncResult {
   ok: boolean
+  status?: number
   message?: string
   snapshot?: AppSnapshot
   savedAt?: string

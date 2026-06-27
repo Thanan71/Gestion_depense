@@ -18,6 +18,7 @@ import type { AppSnapshot } from '@/types/sync'
 const SYNC_ENABLED = import.meta.env.VITE_SYNC_ENABLED === 'true'
 const SYNC_PROVIDER = import.meta.env.VITE_SYNC_PROVIDER
 const SYNC_META_PREFIX = 'gestion-depense:remote-sync'
+const SYNC_CONFLICT_PREFIX = 'gestion-depense:remote-sync-conflict'
 
 type SyncStatus = 'disabled' | 'loading' | 'synced' | 'offline' | 'error'
 
@@ -75,6 +76,8 @@ const writeSyncMeta = (userId: string, meta: SyncMeta) => {
 
 const isOnline = () => navigator.onLine
 
+const conflictSnapshotKey = (userId: string) => `${SYNC_CONFLICT_PREFIX}:${userId}:${Date.now()}`
+
 export const useRemoteSync = () => {
   const status = ref<SyncStatus>('disabled')
   const notificationStore = useNotificationStore()
@@ -127,12 +130,45 @@ export const useRemoteSync = () => {
     )
   }
 
+  const applySnapshot = async (stores: StoreGeneric[], snapshot: AppSnapshot) => {
+    applyingRemoteSnapshot = true
+    for (const store of stores) {
+      const savedState = snapshot.stores[store.$id]
+      if (savedState) store.$patch(savedState)
+    }
+    await nextTick()
+    applyingRemoteSnapshot = false
+  }
+
   const pushLocalSnapshot = async (
     userId: string,
     stores: StoreGeneric[],
     baseRevisionId: string | null
   ) => {
-    const pushed = await remoteSyncService.push(createSnapshot(stores, baseRevisionId))
+    const snapshot = createSnapshot(stores, baseRevisionId)
+    const pushed = await remoteSyncService.push(snapshot)
+    if (!pushed.ok && pushed.status === 409) {
+      window.localStorage.setItem(conflictSnapshotKey(userId), JSON.stringify(snapshot))
+
+      const pulled = await remoteSyncService.pull()
+      if (pulled.ok && pulled.snapshot) {
+        await applySnapshot(stores, pulled.snapshot)
+        writeSyncMeta(userId, {
+          revisionId: pulled.snapshot.revisionId ?? pushed.revisionId ?? null,
+          pending: false
+        })
+      } else {
+        writeSyncMeta(userId, {
+          revisionId: pushed.revisionId ?? baseRevisionId,
+          pending: false
+        })
+      }
+
+      throw new Error(
+        'Conflit de synchronisation : les données locales ont été sauvegardées en secours et la version distante a été rechargée.'
+      )
+    }
+
     if (!pushed.ok) throw new Error(pushed.message ?? 'Remote push failed.')
 
     writeSyncMeta(userId, {
@@ -178,13 +214,7 @@ export const useRemoteSync = () => {
         const revisionId = pulled.snapshot?.revisionId ?? pulled.revisionId ?? meta.revisionId
 
         if (pulled.snapshot?.stores) {
-          applyingRemoteSnapshot = true
-          for (const store of stores) {
-            const savedState = pulled.snapshot.stores[store.$id]
-            if (savedState) store.$patch(savedState)
-          }
-          await nextTick()
-          applyingRemoteSnapshot = false
+          await applySnapshot(stores, pulled.snapshot)
           writeSyncMeta(userId, {
             revisionId: revisionId ?? null,
             pending: false

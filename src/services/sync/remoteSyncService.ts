@@ -7,11 +7,15 @@ const parseResult = async (response: Response): Promise<RemoteSyncResult> => {
   if (!response.ok) {
     return {
       ok: false,
+      status: response.status,
+      revisionId: payload?.revisionId ?? null,
       message: payload?.message ?? `Remote sync failed: ${response.status}`
     }
   }
 
-  return payload ?? { ok: false, message: 'Remote sync returned an empty response.' }
+  return payload
+    ? { ...payload, status: response.status }
+    : { ok: false, status: response.status, message: 'Remote sync returned an empty response.' }
 }
 
 export const remoteSyncService = {
