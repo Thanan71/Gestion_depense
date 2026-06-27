@@ -9,6 +9,7 @@ import {
   Flag,
   Info,
   LayoutDashboard,
+  LogOut,
   Moon,
   PiggyBank,
   ReceiptText,
@@ -24,9 +25,16 @@ import { useRoute } from 'vue-router'
 import GlobalSearch from '@/components/navigation/GlobalSearch.vue'
 import ToastStack from '@/components/notifications/ToastStack.vue'
 import { useTheme } from '@/composables/useTheme'
+import { useAuthStore } from '@/stores/useAuthStore'
 
 const route = useRoute()
 const { toggleTheme } = useTheme()
+const authStore = useAuthStore()
+
+const logout = async () => {
+  await authStore.logout()
+  window.location.href = '/login'
+}
 
 const links = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -74,6 +82,9 @@ const pageTitle = computed(
           <GlobalSearch />
           <button class="btn icon-btn" type="button" title="Changer le thème" @click="toggleTheme">
             <Moon :size="18" />
+          </button>
+          <button class="btn icon-btn" type="button" title="Déconnexion" @click="logout">
+            <LogOut :size="18" />
           </button>
           <RouterLink class="btn primary" to="/expenses/new">
             <Flag :size="18" />

@@ -6,7 +6,8 @@ export const remoteSyncService = {
   async pull(): Promise<RemoteSyncResult> {
     const response = await fetch(ENDPOINT, {
       method: 'GET',
-      headers: { accept: 'application/json' }
+      headers: { accept: 'application/json' },
+      credentials: 'include'
     })
 
     if (!response.ok) return { ok: false, message: `Remote pull failed: ${response.status}` }
@@ -21,6 +22,7 @@ export const remoteSyncService = {
         accept: 'application/json',
         'content-type': 'application/json'
       },
+      credentials: 'include',
       body: JSON.stringify(snapshot)
     })
 

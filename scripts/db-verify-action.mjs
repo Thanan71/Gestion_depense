@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -16,12 +17,15 @@ const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 })
+let temporaryUserId
 
-const callFunction = async (handler, method, body) => {
+const hashSessionToken = (token) => createHash('sha256').update(token).digest('hex')
+
+const callFunction = async (handler, method, body, cookie) => {
   const response = await handler({
     httpMethod: method,
     body: body ? JSON.stringify(body) : null,
-    headers: {},
+    headers: cookie ? { cookie } : {},
     multiValueHeaders: {},
     queryStringParameters: null,
     multiValueQueryStringParameters: null,
@@ -52,9 +56,21 @@ try {
   })
 
   const { handler } = require(bundledFunction)
-  const previous = await callFunction(handler, 'GET')
   const verificationId = `expense-db-verify-${Date.now()}`
   const now = new Date().toISOString()
+  const email = `verify-${Date.now()}@example.test`
+  const sessionToken = randomBytes(32).toString('base64url')
+  const user = await pool.query(
+    "insert into app_users (email, password_hash, display_name) values ($1, 'verification-only', 'Vérification') returning id",
+    [email]
+  )
+  const userId = user.rows[0].id
+  temporaryUserId = userId
+  await pool.query(
+    "insert into user_sessions (user_id, token_hash, expires_at) values ($1, $2, now() + interval '10 minutes')",
+    [userId, hashSessionToken(sessionToken)]
+  )
+  const cookie = `gd_session=${sessionToken}`
   const snapshot = {
     version: 2,
     exportedAt: now,
@@ -164,28 +180,31 @@ try {
     }
   }
 
-  await callFunction(handler, 'PUT', snapshot)
+  await callFunction(handler, 'PUT', snapshot, cookie)
 
   const { rows } = await pool.query('select id, title, kind from transactions where id = $1', [
-    verificationId
+    `${userId}:${verificationId}`
   ])
 
-  if (rows[0]?.id !== verificationId || rows[0]?.kind !== 'expense') {
+  if (rows[0]?.id !== `${userId}:${verificationId}` || rows[0]?.kind !== 'expense') {
     throw new Error('The simulated site action was not found in PostgreSQL.')
   }
 
-  const tableChecks = await pool.query(`
+  const tableChecks = await pool.query(
+    `
     select
-      (select count(*)::int from app_users) as app_users,
-      (select count(*)::int from accounts) as accounts,
-      (select count(*)::int from categories) as categories,
-      (select count(*)::int from budgets) as budgets,
-      (select count(*)::int from transactions) as transactions,
-      (select count(*)::int from goals) as goals,
-      (select count(*)::int from subscriptions) as subscriptions,
-      (select count(*)::int from debts) as debts,
-      (select count(*)::int from settings) as settings
-  `)
+      (select count(*)::int from app_users where id = $1) as app_users,
+      (select count(*)::int from accounts where user_id = $1) as accounts,
+      (select count(*)::int from categories where user_id = $1) as categories,
+      (select count(*)::int from budgets where user_id = $1) as budgets,
+      (select count(*)::int from transactions where user_id = $1) as transactions,
+      (select count(*)::int from goals where user_id = $1) as goals,
+      (select count(*)::int from subscriptions where user_id = $1) as subscriptions,
+      (select count(*)::int from debts where user_id = $1) as debts,
+      (select count(*)::int from settings where user_id = $1) as settings
+  `,
+    [userId]
+  )
 
   const missingTables = Object.entries(tableChecks.rows[0])
     .filter(([, count]) => Number(count) < 1)
@@ -195,27 +214,14 @@ try {
     throw new Error(`The sync did not write every expected table: ${missingTables.join(', ')}`)
   }
 
-  if (previous.snapshot) {
-    await callFunction(handler, 'PUT', previous.snapshot)
-  } else {
-    await callFunction(handler, 'PUT', {
-      version: 2,
-      exportedAt: new Date().toISOString(),
-      stores: {
-        accounts: { accounts: [] },
-        categories: { categories: [] },
-        budgets: { budgets: [] },
-        expenses: { expenses: [], query: '', categoryFilter: 'all', periodFilter: 'month' },
-        income: { income: [] },
-        goals: { goals: [] },
-        subscriptions: { subscriptions: [] },
-        debts: { debts: [] }
-      }
-    })
-  }
+  await pool.query('delete from app_users where id = $1', [userId])
+  temporaryUserId = undefined
 
-  console.log(`Site action persisted in PostgreSQL normalized tables: ${verificationId}`)
+  console.log(`Isolated user action persisted in PostgreSQL normalized tables: ${verificationId}`)
 } finally {
+  if (temporaryUserId) {
+    await pool.query('delete from app_users where id = $1', [temporaryUserId])
+  }
   await pool.end()
   await rm(tempDir, { recursive: true, force: true })
 }

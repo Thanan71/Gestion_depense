@@ -63,6 +63,17 @@ a {
   grid-template-columns: 260px minmax(0, 1fr);
 }
 
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(440px, 100%);
+}
+
 .sidebar {
   position: sticky;
   top: 0;

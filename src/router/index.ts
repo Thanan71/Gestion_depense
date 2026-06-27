@@ -1,10 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { useAuthStore } from '@/stores/useAuthStore'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: () => import('@/pages/AuthPage.vue') },
     {
       path: '/',
       component: AppLayout,
@@ -51,6 +53,21 @@ const router = createRouter({
     { path: '/not-found', name: 'not-found', component: () => import('@/pages/NotFoundPage.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/not-found' }
   ]
+})
+
+router.beforeEach(async (to) => {
+  const authStore = useAuthStore()
+
+  if (!authStore.initialized) {
+    await authStore.fetchMe()
+  }
+
+  if (to.name === 'login') {
+    if (authStore.isAuthenticated) return '/'
+    return true
+  }
+
+  return authStore.isAuthenticated ? true : { name: 'login' }
 })
 
 export default router

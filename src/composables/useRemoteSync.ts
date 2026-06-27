@@ -1,8 +1,9 @@
 import type { StoreGeneric } from 'pinia'
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 
 import { remoteSyncService } from '@/services/sync/remoteSyncService'
 import { useAccountStore } from '@/stores/useAccountStore'
+import { useAuthStore } from '@/stores/useAuthStore'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { useCategoryStore } from '@/stores/useCategoryStore'
 import { useDebtStore } from '@/stores/useDebtStore'
@@ -40,21 +41,26 @@ const createSnapshot = (stores: StoreGeneric[]): AppSnapshot => ({
 export const useRemoteSync = () => {
   const status = ref<'disabled' | 'loading' | 'synced' | 'offline' | 'error'>('disabled')
   const notificationStore = useNotificationStore()
+  const authStore = useAuthStore()
 
-  onMounted(async () => {
-    if (!SYNC_ENABLED || SYNC_PROVIDER !== 'postgres') return
+  let stopStoreWatcher: (() => void) | undefined
+
+  const startSync = async () => {
+    if (!SYNC_ENABLED || SYNC_PROVIDER !== 'postgres' || !authStore.user) return
 
     const stores = trackedStores()
+    stopStoreWatcher?.()
     status.value = 'loading'
-
     try {
       const pulled = await remoteSyncService.pull()
-      if (pulled.ok && pulled.snapshot?.stores) {
+      if (!pulled.ok) throw new Error(pulled.message ?? 'Remote sync failed.')
+
+      if (pulled.snapshot?.stores) {
         for (const store of stores) {
           const savedState = pulled.snapshot.stores[store.$id]
           if (savedState) store.$patch(savedState)
         }
-      } else if (pulled.ok) {
+      } else {
         await remoteSyncService.push(createSnapshot(stores))
       }
 
@@ -62,7 +68,7 @@ export const useRemoteSync = () => {
       status.value = 'synced'
 
       let timeout: number | undefined
-      watch(
+      stopStoreWatcher = watch(
         () => stores.map((store) => store.$state),
         () => {
           window.clearTimeout(timeout)
@@ -85,7 +91,9 @@ export const useRemoteSync = () => {
         type: 'warning'
       })
     }
-  })
+  }
+
+  watch(() => authStore.user?.id, startSync, { immediate: true })
 
   return { status }
 }

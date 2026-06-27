@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import type { PoolClient } from 'pg'
 
+import { requireUser } from '../../src/server/auth.js'
 import { getReadOnlyPool, getReadWritePool } from '../../src/server/database.js'
 import type {
   Account,
@@ -38,31 +39,43 @@ const dateOnly = (value: unknown) => {
 const timeOnly = (value: unknown) => String(value ?? '00:00').slice(0, 5)
 const numberValue = (value: unknown) => Number(value ?? 0)
 const textArray = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : [])
+const dbId = (userId: string, id?: string | null) => (id ? `${userId}:${id}` : null)
+const appId = (userId: string, id?: string | null) =>
+  id?.startsWith(`${userId}:`) ? id.slice(userId.length + 1) : (id ?? undefined)
 
-const pullSnapshot = async (): Promise<AppSnapshot | null> => {
+const pullSnapshot = async (userId: string): Promise<AppSnapshot | null> => {
   const pool = getReadOnlyPool()
   const [accounts, categories, budgets, transactions, goals, subscriptions, debts, settings] =
     await Promise.all([
-      pool.query('select id, name, type, balance from accounts order by created_at, id'),
       pool.query(
-        'select id, name, icon, color, parent_id, budget_id from categories order by created_at, id'
+        'select id, name, type, balance from accounts where user_id = $1 order by created_at, id',
+        [userId]
       ),
       pool.query(
-        'select id, name, amount, period, category_id, alert_threshold, created_at, updated_at from budgets order by created_at, id'
+        'select id, name, icon, color, parent_id, budget_id from categories where user_id = $1 order by created_at, id',
+        [userId]
       ),
       pool.query(
-        'select id, kind, title, description, amount, date, time, category_id, sub_category_id, account_id, payment_method, tags, receipt_photo, location, recurrence, archived, created_at, updated_at from transactions order by date desc, time desc, created_at desc'
+        'select id, name, amount, period, category_id, alert_threshold, created_at, updated_at from budgets where user_id = $1 order by created_at, id',
+        [userId]
       ),
       pool.query(
-        'select id, name, target_amount, current_amount, due_date, icon, created_at, updated_at from goals order by created_at, id'
+        'select id, kind, title, description, amount, date, time, category_id, sub_category_id, account_id, payment_method, tags, receipt_photo, location, recurrence, archived, created_at, updated_at from transactions where user_id = $1 order by date desc, time desc, created_at desc',
+        [userId]
       ),
       pool.query(
-        'select id, name, amount, renewal_date, recurrence, notify_before_days, category_id, created_at, updated_at from subscriptions order by renewal_date, id'
+        'select id, name, target_amount, current_amount, due_date, icon, created_at, updated_at from goals where user_id = $1 order by created_at, id',
+        [userId]
       ),
       pool.query(
-        'select id, person, amount, direction, due_date, history, created_at, updated_at from debts order by created_at, id'
+        'select id, name, amount, renewal_date, recurrence, notify_before_days, category_id, created_at, updated_at from subscriptions where user_id = $1 order by renewal_date, id',
+        [userId]
       ),
-      pool.query("select data from settings where id = 'default'")
+      pool.query(
+        'select id, person, amount, direction, due_date, history, created_at, updated_at from debts where user_id = $1 order by created_at, id',
+        [userId]
+      ),
+      pool.query('select data from settings where user_id = $1', [userId])
     ])
 
   const hasRemoteData =
@@ -79,16 +92,16 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
 
   const mappedTransactions = transactions.rows.map((row): Transaction => {
     const base = {
-      id: row.id,
+      id: appId(userId, row.id) ?? row.id,
       kind: row.kind,
       title: row.title,
       description: row.description ?? '',
       amount: numberValue(row.amount),
       date: dateOnly(row.date) ?? new Date().toISOString().slice(0, 10),
       time: timeOnly(row.time),
-      categoryId: row.category_id ?? '',
-      subCategoryId: row.sub_category_id ?? undefined,
-      accountId: row.account_id ?? '',
+      categoryId: appId(userId, row.category_id) ?? '',
+      subCategoryId: appId(userId, row.sub_category_id),
+      accountId: appId(userId, row.account_id) ?? '',
       paymentMethod: row.payment_method,
       tags: textArray(row.tags),
       receiptPhoto: row.receipt_photo ?? undefined,
@@ -108,7 +121,7 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
     accounts: {
       accounts: accounts.rows.map(
         (row): Account => ({
-          id: row.id,
+          id: appId(userId, row.id) ?? row.id,
           name: row.name,
           type: row.type,
           balance: numberValue(row.balance)
@@ -118,23 +131,23 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
     categories: {
       categories: categories.rows.map(
         (row): Category => ({
-          id: row.id,
+          id: appId(userId, row.id) ?? row.id,
           name: row.name,
           icon: row.icon,
           color: row.color,
-          parentId: row.parent_id ?? undefined,
-          budgetId: row.budget_id ?? undefined
+          parentId: appId(userId, row.parent_id),
+          budgetId: appId(userId, row.budget_id)
         })
       )
     },
     budgets: {
       budgets: budgets.rows.map(
         (row): Budget => ({
-          id: row.id,
+          id: appId(userId, row.id) ?? row.id,
           name: row.name,
           amount: numberValue(row.amount),
           period: row.period,
-          categoryId: row.category_id ?? undefined,
+          categoryId: appId(userId, row.category_id),
           alertThreshold: Number(row.alert_threshold),
           createdAt: row.created_at?.toISOString?.() ?? String(row.created_at),
           updatedAt: row.updated_at?.toISOString?.() ?? String(row.updated_at)
@@ -153,7 +166,7 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
     goals: {
       goals: goals.rows.map(
         (row): Goal => ({
-          id: row.id,
+          id: appId(userId, row.id) ?? row.id,
           name: row.name,
           targetAmount: numberValue(row.target_amount),
           currentAmount: numberValue(row.current_amount),
@@ -167,13 +180,13 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
     subscriptions: {
       subscriptions: subscriptions.rows.map(
         (row): Subscription => ({
-          id: row.id,
+          id: appId(userId, row.id) ?? row.id,
           name: row.name,
           amount: numberValue(row.amount),
           renewalDate: dateOnly(row.renewal_date) ?? new Date().toISOString().slice(0, 10),
           recurrence: row.recurrence,
           notifyBeforeDays: Number(row.notify_before_days),
-          categoryId: row.category_id ?? undefined,
+          categoryId: appId(userId, row.category_id),
           createdAt: row.created_at?.toISOString?.() ?? String(row.created_at),
           updatedAt: row.updated_at?.toISOString?.() ?? String(row.updated_at)
         })
@@ -182,7 +195,7 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
     debts: {
       debts: debts.rows.map(
         (row): Debt => ({
-          id: row.id,
+          id: appId(userId, row.id) ?? row.id,
           person: row.person,
           amount: numberValue(row.amount),
           direction: row.direction,
@@ -206,7 +219,7 @@ const pullSnapshot = async (): Promise<AppSnapshot | null> => {
   }
 }
 
-const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
+const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot, userId: string) => {
   const accounts = (snapshot.stores.accounts?.accounts ?? []) as Account[]
   const categories = (snapshot.stores.categories?.categories ?? []) as Category[]
   const budgets = (snapshot.stores.budgets?.budgets ?? []) as Budget[]
@@ -219,58 +232,57 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
   await client.query('begin')
   try {
-    await client.query(`
-      delete from transactions;
-      delete from budgets;
-      delete from subscriptions;
-      delete from debts;
-      delete from goals;
-      delete from categories;
-      delete from accounts;
-      delete from settings;
-    `)
+    const deleteOrder = [
+      'transactions',
+      'budgets',
+      'subscriptions',
+      'debts',
+      'goals',
+      'categories',
+      'accounts',
+      'settings'
+    ]
 
-    await client.query(`
-      insert into app_users (display_name)
-      select 'Utilisateur local'
-      where not exists (select 1 from app_users)
-    `)
+    for (const table of deleteOrder) {
+      await client.query(`delete from ${table} where user_id = $1`, [userId])
+    }
 
     for (const account of accounts) {
-      await client.query('insert into accounts (id, name, type, balance) values ($1, $2, $3, $4)', [
-        account.id,
-        account.name,
-        account.type,
-        account.balance
-      ])
+      await client.query(
+        'insert into accounts (id, user_id, name, type, balance) values ($1, $2, $3, $4, $5)',
+        [dbId(userId, account.id), userId, account.name, account.type, account.balance]
+      )
     }
 
     for (const category of categories) {
-      await client.query('insert into categories (id, name, icon, color) values ($1, $2, $3, $4)', [
-        category.id,
-        category.name,
-        category.icon,
-        category.color
-      ])
+      await client.query(
+        'insert into categories (id, user_id, name, icon, color) values ($1, $2, $3, $4, $5)',
+        [dbId(userId, category.id), userId, category.name, category.icon, category.color]
+      )
     }
 
     for (const category of categories) {
-      await client.query('update categories set parent_id = $2, budget_id = $3 where id = $1', [
-        category.id,
-        category.parentId ?? null,
-        category.budgetId ?? null
-      ])
+      await client.query(
+        'update categories set parent_id = $3, budget_id = $4 where id = $1 and user_id = $2',
+        [
+          dbId(userId, category.id),
+          userId,
+          dbId(userId, category.parentId),
+          dbId(userId, category.budgetId)
+        ]
+      )
     }
 
     for (const budget of budgets) {
       await client.query(
-        'insert into budgets (id, name, amount, period, category_id, alert_threshold, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8)',
+        'insert into budgets (id, user_id, name, amount, period, category_id, alert_threshold, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
         [
-          budget.id,
+          dbId(userId, budget.id),
+          userId,
           budget.name,
           budget.amount,
           budget.period,
-          budget.categoryId ?? null,
+          dbId(userId, budget.categoryId),
           budget.alertThreshold,
           budget.createdAt,
           budget.updatedAt
@@ -280,18 +292,19 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
     for (const transaction of [...expenses, ...income]) {
       await client.query(
-        'insert into transactions (id, kind, title, description, amount, date, time, category_id, sub_category_id, account_id, payment_method, tags, receipt_photo, location, recurrence, archived, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)',
+        'insert into transactions (id, user_id, kind, title, description, amount, date, time, category_id, sub_category_id, account_id, payment_method, tags, receipt_photo, location, recurrence, archived, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)',
         [
-          transaction.id,
+          dbId(userId, transaction.id),
+          userId,
           transaction.kind,
           transaction.title,
           transaction.description,
           transaction.amount,
           transaction.date,
           transaction.time,
-          transaction.categoryId || null,
-          transaction.subCategoryId ?? null,
-          transaction.accountId || null,
+          dbId(userId, transaction.categoryId),
+          dbId(userId, transaction.subCategoryId),
+          dbId(userId, transaction.accountId),
           transaction.paymentMethod,
           transaction.tags,
           transaction.receiptPhoto ?? null,
@@ -306,9 +319,10 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
     for (const goal of goals) {
       await client.query(
-        'insert into goals (id, name, target_amount, current_amount, due_date, icon, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8)',
+        'insert into goals (id, user_id, name, target_amount, current_amount, due_date, icon, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
         [
-          goal.id,
+          dbId(userId, goal.id),
+          userId,
           goal.name,
           goal.targetAmount,
           goal.currentAmount,
@@ -322,15 +336,16 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
     for (const subscription of subscriptions) {
       await client.query(
-        'insert into subscriptions (id, name, amount, renewal_date, recurrence, notify_before_days, category_id, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+        'insert into subscriptions (id, user_id, name, amount, renewal_date, recurrence, notify_before_days, category_id, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
         [
-          subscription.id,
+          dbId(userId, subscription.id),
+          userId,
           subscription.name,
           subscription.amount,
           subscription.renewalDate,
           subscription.recurrence,
           subscription.notifyBeforeDays,
-          subscription.categoryId ?? null,
+          dbId(userId, subscription.categoryId),
           subscription.createdAt,
           subscription.updatedAt
         ]
@@ -339,9 +354,10 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
     for (const debt of debts) {
       await client.query(
-        'insert into debts (id, person, amount, direction, due_date, history, created_at, updated_at) values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)',
+        'insert into debts (id, user_id, person, amount, direction, due_date, history, created_at, updated_at) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)',
         [
-          debt.id,
+          dbId(userId, debt.id),
+          userId,
           debt.person,
           debt.amount,
           debt.direction,
@@ -355,8 +371,8 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
     if (settings) {
       await client.query(
-        "insert into settings (id, data, updated_at) values ('default', $1::jsonb, now())",
-        [JSON.stringify(settings)]
+        'insert into settings (id, user_id, data, updated_at) values ($1, $2, $3::jsonb, now())',
+        [userId, userId, JSON.stringify(settings)]
       )
     }
 
@@ -369,8 +385,10 @@ const replaceRemoteData = async (client: PoolClient, snapshot: AppSnapshot) => {
 
 export const handler: Handler = async (event) => {
   try {
+    const user = await requireUser(event)
+
     if (event.httpMethod === 'GET') {
-      return json(200, { ok: true, snapshot: await pullSnapshot() })
+      return json(200, { ok: true, snapshot: await pullSnapshot(user.id) })
     }
 
     if (event.httpMethod === 'PUT') {
@@ -380,7 +398,7 @@ export const handler: Handler = async (event) => {
 
       const client = await getReadWritePool().connect()
       try {
-        await replaceRemoteData(client, snapshot)
+        await replaceRemoteData(client, snapshot, user.id)
       } finally {
         client.release()
       }
@@ -389,7 +407,11 @@ export const handler: Handler = async (event) => {
     }
 
     return json(405, { ok: false, message: 'Method not allowed.' })
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+      return json(401, { ok: false, message: 'Non authentifié.' })
+    }
+    console.error('Unable to sync application data', error)
     return json(500, { ok: false, message: 'Unable to sync application data.' })
   }
 }
