@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": ["dist", "node_modules", "coverage", "playwright-report", "test-results"]
+    "ignore": ["dist", "node_modules", "coverage", "playwright-report", "test-results", ".netlify"]
   },
   "formatter": {
     "enabled": true,
