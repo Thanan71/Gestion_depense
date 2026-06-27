@@ -11,6 +11,7 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
+    "pwa:icons": "node scripts/generate-pwa-icons.mjs",
     "db:health": "node scripts/db-health.mjs",
     "db:migrate": "node scripts/db-migrate.mjs",
     "db:verify-action": "node scripts/db-verify-action.mjs",

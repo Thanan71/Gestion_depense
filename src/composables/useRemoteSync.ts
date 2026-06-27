@@ -1,5 +1,5 @@
 import type { StoreGeneric } from 'pinia'
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { remoteSyncService } from '@/services/sync/remoteSyncService'
 import { useAccountStore } from '@/stores/useAccountStore'
@@ -17,6 +17,20 @@ import type { AppSnapshot } from '@/types/sync'
 
 const SYNC_ENABLED = import.meta.env.VITE_SYNC_ENABLED === 'true'
 const SYNC_PROVIDER = import.meta.env.VITE_SYNC_PROVIDER
+const SYNC_META_PREFIX = 'gestion-depense:remote-sync'
+
+type SyncStatus = 'disabled' | 'loading' | 'synced' | 'offline' | 'error'
+
+interface SyncMeta {
+  revisionId: string | null
+  pending: boolean
+  updatedAt?: string
+}
+
+const defaultSyncMeta = (): SyncMeta => ({
+  revisionId: null,
+  pending: false
+})
 
 const trackedStores = (): StoreGeneric[] => [
   useExpenseStore(),
@@ -39,67 +53,192 @@ const createSnapshot = (stores: StoreGeneric[], baseRevisionId: string | null): 
   )
 })
 
+const syncMetaKey = (userId: string) => `${SYNC_META_PREFIX}:${userId}`
+
+const readSyncMeta = (userId: string): SyncMeta => {
+  const raw = window.localStorage.getItem(syncMetaKey(userId))
+  if (!raw) return defaultSyncMeta()
+
+  try {
+    return { ...defaultSyncMeta(), ...(JSON.parse(raw) as Partial<SyncMeta>) }
+  } catch {
+    return defaultSyncMeta()
+  }
+}
+
+const writeSyncMeta = (userId: string, meta: SyncMeta) => {
+  window.localStorage.setItem(
+    syncMetaKey(userId),
+    JSON.stringify({ ...meta, updatedAt: new Date().toISOString() })
+  )
+}
+
+const isOnline = () => navigator.onLine
+
 export const useRemoteSync = () => {
-  const status = ref<'disabled' | 'loading' | 'synced' | 'offline' | 'error'>('disabled')
+  const status = ref<SyncStatus>('disabled')
   const notificationStore = useNotificationStore()
   const authStore = useAuthStore()
 
   let stopStoreWatcher: (() => void) | undefined
-  let remoteRevisionId: string | null = null
+  let syncTimeout: number | undefined
+  let syncing = false
+  let queuedSync = false
+  let applyingRemoteSnapshot = false
+  let lastOfflineNotificationAt = 0
+
+  const notifyOffline = () => {
+    const now = Date.now()
+    if (now - lastOfflineNotificationAt < 30_000) return
+    lastOfflineNotificationAt = now
+    notificationStore.push({
+      title: 'Synchronisation en attente',
+      message: 'Les changements restent sur ce téléphone et partiront quand Internet revient.',
+      type: 'warning'
+    })
+  }
+
+  const scheduleSync = () => {
+    window.clearTimeout(syncTimeout)
+    syncTimeout = window.setTimeout(() => {
+      void startSync()
+    }, 800)
+  }
+
+  const installStoreWatcher = (userId: string, stores: StoreGeneric[]) => {
+    stopStoreWatcher?.()
+    stopStoreWatcher = watch(
+      () => stores.map((store) => store.$state),
+      () => {
+        if (applyingRemoteSnapshot) return
+
+        const meta = readSyncMeta(userId)
+        writeSyncMeta(userId, { ...meta, pending: true })
+
+        if (!isOnline()) {
+          status.value = 'offline'
+          notifyOffline()
+          return
+        }
+
+        scheduleSync()
+      },
+      { deep: true }
+    )
+  }
+
+  const pushLocalSnapshot = async (
+    userId: string,
+    stores: StoreGeneric[],
+    baseRevisionId: string | null
+  ) => {
+    const pushed = await remoteSyncService.push(createSnapshot(stores, baseRevisionId))
+    if (!pushed.ok) throw new Error(pushed.message ?? 'Remote push failed.')
+
+    writeSyncMeta(userId, {
+      revisionId: pushed.revisionId ?? null,
+      pending: false
+    })
+  }
 
   const startSync = async () => {
-    if (!SYNC_ENABLED || SYNC_PROVIDER !== 'postgres' || !authStore.user) return
+    if (!SYNC_ENABLED || SYNC_PROVIDER !== 'postgres' || !authStore.user) {
+      stopStoreWatcher?.()
+      status.value = 'disabled'
+      return
+    }
 
+    const userId = authStore.user.id
     const stores = trackedStores()
-    stopStoreWatcher?.()
-    status.value = 'loading'
-    try {
-      const pulled = await remoteSyncService.pull()
-      if (!pulled.ok) throw new Error(pulled.message ?? 'Remote sync failed.')
-      remoteRevisionId = pulled.snapshot?.revisionId ?? pulled.revisionId ?? null
+    installStoreWatcher(userId, stores)
 
-      if (pulled.snapshot?.stores) {
-        for (const store of stores) {
-          const savedState = pulled.snapshot.stores[store.$id]
-          if (savedState) store.$patch(savedState)
-        }
+    if (!isOnline()) {
+      status.value = 'offline'
+      notifyOffline()
+      return
+    }
+
+    if (syncing) {
+      queuedSync = true
+      return
+    }
+
+    syncing = true
+    status.value = 'loading'
+
+    try {
+      const meta = readSyncMeta(userId)
+
+      if (meta.pending) {
+        await pushLocalSnapshot(userId, stores, meta.revisionId)
       } else {
-        const pushed = await remoteSyncService.push(createSnapshot(stores, remoteRevisionId))
-        if (!pushed.ok) throw new Error(pushed.message ?? 'Remote sync failed.')
-        remoteRevisionId = pushed.revisionId ?? null
+        const pulled = await remoteSyncService.pull()
+        if (!pulled.ok) throw new Error(pulled.message ?? 'Remote sync failed.')
+
+        const revisionId = pulled.snapshot?.revisionId ?? pulled.revisionId ?? meta.revisionId
+
+        if (pulled.snapshot?.stores) {
+          applyingRemoteSnapshot = true
+          for (const store of stores) {
+            const savedState = pulled.snapshot.stores[store.$id]
+            if (savedState) store.$patch(savedState)
+          }
+          await nextTick()
+          applyingRemoteSnapshot = false
+          writeSyncMeta(userId, {
+            revisionId: revisionId ?? null,
+            pending: false
+          })
+        } else {
+          await pushLocalSnapshot(userId, stores, revisionId ?? null)
+        }
       }
 
       await nextTick()
       status.value = 'synced'
-
-      let timeout: number | undefined
-      stopStoreWatcher = watch(
-        () => stores.map((store) => store.$state),
-        () => {
-          window.clearTimeout(timeout)
-          timeout = window.setTimeout(async () => {
-            try {
-              const pushed = await remoteSyncService.push(createSnapshot(stores, remoteRevisionId))
-              status.value = pushed.ok ? 'synced' : 'error'
-              if (pushed.ok) remoteRevisionId = pushed.revisionId ?? null
-            } catch {
-              status.value = 'offline'
-            }
-          }, 800)
-        },
-        { deep: true }
-      )
-    } catch {
-      status.value = 'offline'
+    } catch (error) {
+      applyingRemoteSnapshot = false
+      status.value = isOnline() ? 'error' : 'offline'
       notificationStore.push({
-        title: 'Synchronisation distante indisponible',
-        message: 'Les données restent sauvegardées localement dans le navigateur.',
-        type: 'warning'
+        title: status.value === 'error' ? 'Synchronisation bloquée' : 'Synchronisation en attente',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Les données restent sauvegardées localement dans le navigateur.',
+        type: status.value === 'error' ? 'error' : 'warning'
       })
+    } finally {
+      syncing = false
+      if (queuedSync) {
+        queuedSync = false
+        scheduleSync()
+      }
     }
   }
 
   watch(() => authStore.user?.id, startSync, { immediate: true })
+
+  const syncWhenOnline = () => {
+    void startSync()
+  }
+
+  const syncWhenVisible = () => {
+    if (document.visibilityState === 'visible') void startSync()
+  }
+
+  onMounted(() => {
+    window.addEventListener('online', syncWhenOnline)
+    window.addEventListener('offline', notifyOffline)
+    document.addEventListener('visibilitychange', syncWhenVisible)
+  })
+
+  onBeforeUnmount(() => {
+    window.removeEventListener('online', syncWhenOnline)
+    window.removeEventListener('offline', notifyOffline)
+    document.removeEventListener('visibilitychange', syncWhenVisible)
+    window.clearTimeout(syncTimeout)
+    stopStoreWatcher?.()
+  })
 
   return { status }
 }
