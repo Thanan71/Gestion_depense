@@ -31,6 +31,13 @@ create table if not exists app_data_backups (
   created_at timestamptz not null default now()
 );
 
+create table if not exists auth_rate_limits (
+  key text primary key,
+  count integer not null default 0,
+  reset_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists categories (
   id text primary key,
   user_id uuid references app_users(id) on delete cascade,
@@ -146,6 +153,7 @@ create unique index if not exists app_users_email_unique_idx on app_users(lower(
 create index if not exists user_sessions_token_hash_idx on user_sessions(token_hash);
 create index if not exists user_sessions_user_id_idx on user_sessions(user_id);
 create index if not exists app_data_backups_user_created_idx on app_data_backups(user_id, created_at desc);
+create index if not exists auth_rate_limits_reset_at_idx on auth_rate_limits(reset_at);
 
 create index if not exists transactions_user_kind_date_idx on transactions(user_id, kind, date desc);
 create index if not exists transactions_user_category_idx on transactions(user_id, category_id);

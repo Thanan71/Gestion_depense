@@ -1,7 +1,21 @@
 <script setup lang="ts">
+import { Trash2 } from 'lucide-vue-next'
+
+import { AUTH_USER_ID_KEY } from '@/stores/useAuthStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 
 const settingsStore = useSettingsStore()
+const localStoreIds = [
+  'expenses',
+  'income',
+  'budgets',
+  'categories',
+  'settings',
+  'goals',
+  'subscriptions',
+  'debts',
+  'accounts'
+]
 
 const widgets = [
   ['balance', 'Solde'],
@@ -14,6 +28,31 @@ const widgets = [
   ['alerts', 'Alertes'],
   ['subscriptions', 'Abonnements']
 ] as const
+
+const clearLocalData = () => {
+  if (
+    !window.confirm(
+      'Supprimer les données locales de ce navigateur ? Les données distantes du compte ne seront pas supprimées, mais les changements non synchronisés seront perdus.'
+    )
+  ) {
+    return
+  }
+
+  const userId = window.localStorage.getItem(AUTH_USER_ID_KEY) ?? 'anonymous'
+  for (const storeId of localStoreIds) {
+    window.localStorage.removeItem(`gestion-depense:${userId}:${storeId}`)
+  }
+
+  window.localStorage.removeItem(`gestion-depense:remote-sync:${userId}`)
+  for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+    const key = window.localStorage.key(index)
+    if (key?.startsWith(`gestion-depense:remote-sync-conflict:${userId}:`)) {
+      window.localStorage.removeItem(key)
+    }
+  }
+
+  window.location.reload()
+}
 </script>
 
 <template>
@@ -100,6 +139,22 @@ const widgets = [
             @change="settingsStore.toggleWidget(id)"
           />
         </label>
+      </div>
+    </section>
+
+    <section class="card pad">
+      <div class="section-title">
+        <h2>Données locales</h2>
+      </div>
+      <div class="list">
+        <div class="list-item">
+          <span>Stockage de ce navigateur</span>
+          <span class="muted">Le compte reste intact. Les changements non synchronisés seront perdus.</span>
+          <button class="btn danger" type="button" @click="clearLocalData">
+            <Trash2 :size="16" />
+            Supprimer
+          </button>
+        </div>
       </div>
     </section>
   </section>

@@ -28,6 +28,12 @@ interface SyncMeta {
   updatedAt?: string
 }
 
+interface SyncConflict {
+  backupKey: string
+  message: string
+  createdAt: string
+}
+
 const defaultSyncMeta = (): SyncMeta => ({
   revisionId: null,
   pending: false
@@ -80,6 +86,7 @@ const conflictSnapshotKey = (userId: string) => `${SYNC_CONFLICT_PREFIX}:${userI
 
 export const useRemoteSync = () => {
   const status = ref<SyncStatus>('disabled')
+  const conflict = ref<SyncConflict | null>(null)
   const notificationStore = useNotificationStore()
   const authStore = useAuthStore()
 
@@ -140,6 +147,18 @@ export const useRemoteSync = () => {
     applyingRemoteSnapshot = false
   }
 
+  const saveConflictSnapshot = (userId: string, snapshot: AppSnapshot) => {
+    const backupKey = conflictSnapshotKey(userId)
+    const message = 'La version distante a été chargée. Ta version locale est gardée en secours.'
+    window.localStorage.setItem(backupKey, JSON.stringify(snapshot))
+    conflict.value = {
+      backupKey,
+      message,
+      createdAt: new Date().toISOString()
+    }
+    return backupKey
+  }
+
   const pushLocalSnapshot = async (
     userId: string,
     stores: StoreGeneric[],
@@ -148,7 +167,7 @@ export const useRemoteSync = () => {
     const snapshot = createSnapshot(stores, baseRevisionId)
     const pushed = await remoteSyncService.push(snapshot)
     if (!pushed.ok && pushed.status === 409) {
-      window.localStorage.setItem(conflictSnapshotKey(userId), JSON.stringify(snapshot))
+      saveConflictSnapshot(userId, snapshot)
 
       const pulled = await remoteSyncService.pull()
       if (pulled.ok && pulled.snapshot) {
@@ -165,7 +184,7 @@ export const useRemoteSync = () => {
       }
 
       throw new Error(
-        'Conflit de synchronisation : les données locales ont été sauvegardées en secours et la version distante a été rechargée.'
+        'Conflit de synchronisation : choisis quelle version conserver dans la bannière.'
       )
     }
 
@@ -246,6 +265,82 @@ export const useRemoteSync = () => {
     }
   }
 
+  const restoreConflictBackup = async () => {
+    const userId = authStore.user?.id
+    const currentConflict = conflict.value
+    if (!userId || !currentConflict) return
+
+    const rawSnapshot = window.localStorage.getItem(currentConflict.backupKey)
+    if (!rawSnapshot) {
+      conflict.value = null
+      notificationStore.push({
+        title: 'Sauvegarde locale introuvable',
+        message: 'La copie de secours a déjà été supprimée.',
+        type: 'error'
+      })
+      return
+    }
+
+    try {
+      const snapshot = JSON.parse(rawSnapshot) as AppSnapshot
+      const stores = trackedStores()
+      await applySnapshot(stores, snapshot)
+
+      const meta = readSyncMeta(userId)
+      writeSyncMeta(userId, { ...meta, pending: true })
+      window.localStorage.removeItem(currentConflict.backupKey)
+      conflict.value = null
+
+      notificationStore.push({
+        title: 'Version locale restaurée',
+        message: 'Elle sera envoyée dès que la synchronisation repasse.',
+        type: 'success'
+      })
+
+      if (isOnline()) scheduleSync()
+    } catch {
+      notificationStore.push({
+        title: 'Restauration impossible',
+        message: 'La copie locale de secours est illisible.',
+        type: 'error'
+      })
+    }
+  }
+
+  const keepRemoteSnapshot = () => {
+    const currentConflict = conflict.value
+    if (!currentConflict) return
+    window.localStorage.removeItem(currentConflict.backupKey)
+    conflict.value = null
+    notificationStore.push({
+      title: 'Version distante conservée',
+      message: 'La copie locale en conflit a été supprimée.',
+      type: 'info'
+    })
+  }
+
+  const downloadConflictBackup = () => {
+    const currentConflict = conflict.value
+    if (!currentConflict) return
+    const rawSnapshot = window.localStorage.getItem(currentConflict.backupKey)
+    if (!rawSnapshot) {
+      notificationStore.push({
+        title: 'Téléchargement impossible',
+        message: 'La copie locale de secours est introuvable.',
+        type: 'error'
+      })
+      return
+    }
+
+    const blob = new Blob([rawSnapshot], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `gestion-depense-conflit-${new Date().toISOString().slice(0, 10)}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
   watch(() => authStore.user?.id, startSync, { immediate: true })
 
   const syncWhenOnline = () => {
@@ -270,5 +365,5 @@ export const useRemoteSync = () => {
     stopStoreWatcher?.()
   })
 
-  return { status }
+  return { status, conflict, restoreConflictBackup, keepRemoteSnapshot, downloadConflictBackup }
 }

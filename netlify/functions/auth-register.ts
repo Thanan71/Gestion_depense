@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg'
 
 import {
   authJson,
+  consumePersistentRateLimit,
   consumeRateLimit,
   createSession,
   hashPassword,
@@ -47,6 +48,10 @@ export const handler: Handler = async (event) => {
   let client: PoolClient | undefined
   try {
     client = await getReadWritePool().connect()
+    if (!(await consumePersistentRateLimit(client, rateLimitKey(event, 'register', email), 5))) {
+      return authJson(429, { ok: false, message: 'Trop de tentatives. Réessaie plus tard.' })
+    }
+
     await client.query('begin')
     const { rows } = await client.query<{
       id: string

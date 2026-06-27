@@ -5,6 +5,7 @@ export interface AppSnapshot {
   exportedAt: string
   revisionId?: string | null
   baseRevisionId?: string | null
+  allowDestructiveSync?: boolean
   stores: Record<string, StateTree>
 }
 

@@ -16,8 +16,30 @@ import type {
   Subscription
 } from '../../src/types/finance.js'
 import type { AppSnapshot } from '../../src/types/sync.js'
+import { validateSnapshotForSync } from '../../src/utils/snapshotValidation.js'
 
 type Transaction = Expense | Income
+type DataTable =
+  | 'accounts'
+  | 'categories'
+  | 'budgets'
+  | 'transactions'
+  | 'goals'
+  | 'subscriptions'
+  | 'debts'
+
+const DATA_TABLES: DataTable[] = [
+  'accounts',
+  'categories',
+  'budgets',
+  'transactions',
+  'goals',
+  'subscriptions',
+  'debts'
+]
+const MAX_BACKUPS_PER_USER = 20
+const MASS_DELETE_MIN_ROWS = 10
+const MASS_DELETE_RATIO = 0.2
 
 const json = (statusCode: number, body: unknown) => ({
   statusCode,
@@ -144,6 +166,62 @@ const backupCurrentRemoteData = async (
         or exists (select 1 from settings where user_id = $1)
     `,
     [userId, revisionId]
+  )
+}
+
+const purgeOldBackups = async (client: PoolClient, userId: string) => {
+  await client.query(
+    `
+      delete from app_data_backups
+      where user_id = $1
+        and id in (
+          select id
+          from (
+            select
+              id,
+              row_number() over (order by created_at desc, id desc) as backup_rank
+            from app_data_backups
+            where user_id = $1
+          ) ranked_backups
+          where backup_rank > $2
+        )
+    `,
+    [userId, MAX_BACKUPS_PER_USER]
+  )
+}
+
+const countRemoteData = async (client: PoolClient, userId: string) => {
+  const counts = Object.fromEntries(DATA_TABLES.map((table) => [table, 0])) as Record<
+    DataTable,
+    number
+  >
+
+  for (const table of DATA_TABLES) {
+    const { rows } = await client.query<{ count: string }>(
+      `select count(*)::int as count from ${table} where user_id = $1`,
+      [userId]
+    )
+    counts[table] = Number(rows[0]?.count ?? 0)
+  }
+
+  return counts
+}
+
+const detectSuspiciousDeletion = (
+  currentCounts: Record<DataTable, number>,
+  incomingCounts: Record<DataTable, number>
+) => {
+  const currentTotal = DATA_TABLES.reduce((sum, table) => sum + currentCounts[table], 0)
+  const incomingTotal = DATA_TABLES.reduce((sum, table) => sum + incomingCounts[table], 0)
+
+  if (currentTotal >= MASS_DELETE_MIN_ROWS && incomingTotal < currentTotal * MASS_DELETE_RATIO) {
+    return true
+  }
+
+  return DATA_TABLES.some(
+    (table) =>
+      currentCounts[table] >= MASS_DELETE_MIN_ROWS &&
+      incomingCounts[table] < currentCounts[table] * MASS_DELETE_RATIO
   )
 }
 
@@ -349,6 +427,15 @@ const saveRemoteData = async (client: PoolClient, snapshot: AppSnapshot, userId:
   const settings = snapshot.stores.settings?.settings as Settings | undefined
   const categoryIds = new Set(categories.map((category) => category.id))
   const accountIds = new Set(accounts.map((account) => account.id))
+  const incomingCounts: Record<DataTable, number> = {
+    accounts: accounts.length,
+    categories: categories.length,
+    budgets: budgets.length,
+    transactions: expenses.length + income.length,
+    goals: goals.length,
+    subscriptions: subscriptions.length,
+    debts: debts.length
+  }
 
   await client.query('begin')
   try {
@@ -366,7 +453,20 @@ const saveRemoteData = async (client: PoolClient, snapshot: AppSnapshot, userId:
       }
     }
 
+    const currentCounts = await countRemoteData(client, userId)
+    if (!snapshot.allowDestructiveSync && detectSuspiciousDeletion(currentCounts, incomingCounts)) {
+      await client.query('rollback')
+      return {
+        ok: false,
+        statusCode: 409,
+        revisionId: currentRevisionId,
+        message:
+          'Synchronisation refusée : le navigateur essaie de supprimer une grande partie des données distantes.'
+      }
+    }
+
     await backupCurrentRemoteData(client, userId, currentRevisionId)
+    await purgeOldBackups(client, userId)
 
     for (const account of accounts) {
       await client.query(
@@ -670,6 +770,8 @@ export const handler: Handler = async (event) => {
       const snapshot = safeJsonParse<AppSnapshot>(event.body)
       if (!isSnapshot(snapshot))
         return json(400, { ok: false, message: 'Invalid snapshot payload.' })
+      const validation = validateSnapshotForSync(snapshot)
+      if (!validation.valid) return json(400, { ok: false, message: validation.message })
 
       const client = await getReadWritePool().connect()
       let result: Awaited<ReturnType<typeof saveRemoteData>>

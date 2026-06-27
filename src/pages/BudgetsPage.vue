@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { Plus, Trash2, WalletCards } from 'lucide-vue-next'
+import { PenLine, Plus, Trash2, WalletCards, X } from 'lucide-vue-next'
 import { computed, reactive, ref } from 'vue'
 
 import { useCurrency } from '@/composables/useCurrency'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { useCategoryStore } from '@/stores/useCategoryStore'
 import { useExpenseStore } from '@/stores/useExpenseStore'
-import type { BudgetPeriod } from '@/types/finance'
+import type { Budget, BudgetPeriod } from '@/types/finance'
 
 const budgetStore = useBudgetStore()
 const categoryStore = useCategoryStore()
@@ -21,6 +21,7 @@ const form = reactive({
   alertThreshold: 80
 })
 const periodFilter = ref<BudgetPeriod | 'all'>('all')
+const editingBudgetId = ref<string | null>(null)
 
 const periodLabels: Record<BudgetPeriod, string> = {
   weekly: 'Hebdomadaire',
@@ -65,21 +66,55 @@ const budgetRows = computed(() =>
   })
 )
 
-const addBudget = () => {
+const resetForm = () => {
+  form.name = ''
+  form.amount = 0
+  form.period = 'monthly'
+  form.categoryId = ''
+  form.alertThreshold = 80
+  editingBudgetId.value = null
+}
+
+const startEdit = (budget: Budget) => {
+  editingBudgetId.value = budget.id
+  form.name = budget.name
+  form.amount = budget.amount
+  form.period = budget.period
+  form.categoryId = budget.categoryId ?? ''
+  form.alertThreshold = budget.alertThreshold
+}
+
+const saveBudget = () => {
   if (!form.name.trim() || form.amount <= 0) return
-  budgetStore.add({
+  const payload = {
     name: form.name.trim(),
     amount: Number(form.amount),
     period: form.period,
     categoryId: form.categoryId || undefined,
-    alertThreshold: Number(form.alertThreshold)
-  })
-  form.name = ''
-  form.amount = 0
+    alertThreshold: Math.min(Math.max(Number(form.alertThreshold) || 80, 1), 100)
+  }
+
+  const existingBudget = editingBudgetId.value
+    ? budgetStore.budgets.find((budget) => budget.id === editingBudgetId.value)
+    : undefined
+
+  if (existingBudget) {
+    budgetStore.upsert({
+      ...existingBudget,
+      ...payload
+    })
+  } else {
+    budgetStore.add(payload)
+  }
+
+  resetForm()
 }
 
 const removeBudget = (id: string) => {
-  if (window.confirm('Supprimer ce budget ?')) budgetStore.remove(id)
+  if (window.confirm('Supprimer ce budget ?')) {
+    budgetStore.remove(id)
+    if (editingBudgetId.value === id) resetForm()
+  }
 }
 </script>
 
@@ -101,7 +136,7 @@ const removeBudget = (id: string) => {
       </label>
     </div>
 
-    <form class="card pad form-grid" @submit.prevent="addBudget">
+    <form class="card pad form-grid" @submit.prevent="saveBudget">
       <label class="field">
         <span>Nom</span>
         <input v-model="form.name" class="input" required />
@@ -133,8 +168,13 @@ const removeBudget = (id: string) => {
       </label>
       <div class="field" style="align-content: end">
         <button class="btn primary" type="submit">
-          <Plus :size="18" />
-          Ajouter
+          <PenLine v-if="editingBudgetId" :size="18" />
+          <Plus v-else :size="18" />
+          {{ editingBudgetId ? 'Enregistrer' : 'Ajouter' }}
+        </button>
+        <button v-if="editingBudgetId" class="btn" type="button" @click="resetForm">
+          <X :size="18" />
+          Annuler
         </button>
       </div>
     </form>
@@ -145,7 +185,20 @@ const removeBudget = (id: string) => {
           <h2>{{ row.budget.name }}</h2>
           <div class="topbar-actions">
             <WalletCards :size="20" />
-            <button class="btn icon-btn danger" type="button" @click="removeBudget(row.budget.id)">
+            <button
+              aria-label="Modifier le budget"
+              class="btn icon-btn"
+              type="button"
+              @click="startEdit(row.budget)"
+            >
+              <PenLine :size="16" />
+            </button>
+            <button
+              aria-label="Supprimer le budget"
+              class="btn icon-btn danger"
+              type="button"
+              @click="removeBudget(row.budget.id)"
+            >
               <Trash2 :size="16" />
             </button>
           </div>

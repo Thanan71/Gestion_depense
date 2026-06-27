@@ -8,6 +8,7 @@ import { getReadOnlyPool } from './database.js'
 const COOKIE_NAME = 'gd_session'
 const SESSION_DAYS = 30
 const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
+let rateLimitSchemaReady = false
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase()
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex')
@@ -127,6 +128,51 @@ export const consumeRateLimit = (key: string, maxAttempts = 8, windowMs = 15 * 6
 
   bucket.count += 1
   return true
+}
+
+export const consumePersistentRateLimit = async (
+  client: PoolClient,
+  key: string,
+  maxAttempts = 8,
+  windowMs = 15 * 60 * 1000
+) => {
+  if (!rateLimitSchemaReady) {
+    await client.query(`
+      create table if not exists auth_rate_limits (
+        key text primary key,
+        count integer not null default 0,
+        reset_at timestamptz not null,
+        updated_at timestamptz not null default now()
+      );
+
+      create index if not exists auth_rate_limits_reset_at_idx
+        on auth_rate_limits(reset_at);
+    `)
+    rateLimitSchemaReady = true
+  }
+
+  const resetAt = new Date(Date.now() + windowMs)
+  const { rows } = await client.query<{ count: number }>(
+    `
+      insert into auth_rate_limits (key, count, reset_at, updated_at)
+      values ($1, 1, $2, now())
+      on conflict (key)
+      do update set
+        count = case
+          when auth_rate_limits.reset_at <= now() then 1
+          else auth_rate_limits.count + 1
+        end,
+        reset_at = case
+          when auth_rate_limits.reset_at <= now() then excluded.reset_at
+          else auth_rate_limits.reset_at
+        end,
+        updated_at = now()
+      returning count
+    `,
+    [key, resetAt]
+  )
+
+  return Number(rows[0]?.count ?? 0) <= maxAttempts
 }
 
 export const authJson = (statusCode: number, body: unknown, cookie?: string) => ({
