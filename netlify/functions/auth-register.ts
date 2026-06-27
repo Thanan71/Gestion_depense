@@ -1,10 +1,16 @@
 import type { Handler } from '@netlify/functions'
+import type { PoolClient } from 'pg'
 
 import {
   authJson,
+  consumeRateLimit,
   createSession,
   hashPassword,
+  isStrongPassword,
+  isValidAuthEmail,
   normalizeAuthEmail,
+  rateLimitKey,
+  safeJsonParse,
   sessionCookie
 } from '../../src/server/auth.js'
 import { getReadWritePool } from '../../src/server/database.js'
@@ -14,24 +20,33 @@ export const handler: Handler = async (event) => {
     return authJson(405, { ok: false, message: 'Method not allowed.' })
   }
 
-  const payload = JSON.parse(event.body ?? '{}') as {
+  const payload = safeJsonParse<{
     email?: string
     password?: string
     displayName?: string
+  }>(event.body)
+  if (!payload) {
+    return authJson(400, { ok: false, message: 'JSON invalide.' })
   }
+
   const email = normalizeAuthEmail(payload.email ?? '')
   const password = payload.password ?? ''
   const displayName = payload.displayName?.trim() || email.split('@')[0] || 'Utilisateur'
 
-  if (!email.includes('@') || password.length < 8) {
+  if (!isValidAuthEmail(email) || !isStrongPassword(password)) {
     return authJson(400, {
       ok: false,
-      message: 'Email invalide ou mot de passe trop court.'
+      message: 'Email invalide ou mot de passe trop faible.'
     })
   }
 
-  const client = await getReadWritePool().connect()
+  if (!consumeRateLimit(rateLimitKey(event, 'register', email), 5)) {
+    return authJson(429, { ok: false, message: 'Trop de tentatives. Réessaie plus tard.' })
+  }
+
+  let client: PoolClient | undefined
   try {
+    client = await getReadWritePool().connect()
     await client.query('begin')
     const { rows } = await client.query<{
       id: string
@@ -60,10 +75,14 @@ export const handler: Handler = async (event) => {
       },
       sessionCookie(session.token, session.expiresAt)
     )
-  } catch {
-    await client.query('rollback')
-    return authJson(409, { ok: false, message: 'Un compte existe déjà avec cet email.' })
+  } catch (error) {
+    await client?.query('rollback').catch(() => undefined)
+    if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+      return authJson(409, { ok: false, message: 'Un compte existe déjà avec cet email.' })
+    }
+    console.error('Unable to register user', error)
+    return authJson(500, { ok: false, message: 'Inscription impossible.' })
   } finally {
-    client.release()
+    client?.release()
   }
 }

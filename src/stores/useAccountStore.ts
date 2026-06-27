@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 
 import type { Account } from '@/types/finance'
-import { DEFAULT_ACCOUNTS } from '@/utils/constants'
+import { DEFAULT_ACCOUNTS, initialDefaultItems } from '@/utils/constants'
 import { createId } from '@/utils/helpers'
 
 export const useAccountStore = defineStore('accounts', {
   state: () => ({
-    accounts: DEFAULT_ACCOUNTS as Account[]
+    accounts: initialDefaultItems(DEFAULT_ACCOUNTS) as Account[]
   }),
   getters: {
     totalBalance: (state) => state.accounts.reduce((sum, account) => sum + account.balance, 0),

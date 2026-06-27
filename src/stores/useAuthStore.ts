@@ -55,25 +55,35 @@ export const useAuthStore = defineStore('auth', {
     },
     async login(email: string, password: string) {
       this.error = ''
-      const response = await authService.login(email, password)
-      if (!response.ok || !response.user) {
-        this.error = response.message ?? 'Connexion impossible.'
-        return false
+      this.loading = true
+      try {
+        const response = await authService.login(email, password)
+        if (!response.ok || !response.user) {
+          this.error = response.message ?? 'Connexion impossible.'
+          return false
+        }
+        this.setUser(response.user)
+        this.initialized = true
+        return true
+      } finally {
+        this.loading = false
       }
-      this.setUser(response.user)
-      this.initialized = true
-      return true
     },
     async register(email: string, password: string, displayName: string) {
       this.error = ''
-      const response = await authService.register(email, password, displayName)
-      if (!response.ok || !response.user) {
-        this.error = response.message ?? 'Inscription impossible.'
-        return false
+      this.loading = true
+      try {
+        const response = await authService.register(email, password, displayName)
+        if (!response.ok || !response.user) {
+          this.error = response.message ?? 'Inscription impossible.'
+          return false
+        }
+        this.setUser(response.user)
+        this.initialized = true
+        return true
+      } finally {
+        this.loading = false
       }
-      this.setUser(response.user)
-      this.initialized = true
-      return true
     },
     async logout() {
       await authService.logout()

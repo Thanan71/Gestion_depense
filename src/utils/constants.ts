@@ -12,6 +12,19 @@ import type {
 
 const now = new Date().toISOString()
 const month = new Date().toISOString().slice(0, 7)
+const AUTH_USER_ID_STORAGE_KEY = 'gestion-depense:auth-user-id'
+
+const isAuthenticatedStorageReady = () =>
+  typeof window !== 'undefined' && Boolean(window.localStorage.getItem(AUTH_USER_ID_STORAGE_KEY))
+
+const cloneItems = <T>(items: T[]): T[] => JSON.parse(JSON.stringify(items)) as T[]
+
+export const demoDataEnabled = () =>
+  import.meta.env.VITE_ENABLE_DEMO_DATA === 'true' && !isAuthenticatedStorageReady()
+
+export const initialDemoItems = <T>(items: T[]): T[] => (demoDataEnabled() ? cloneItems(items) : [])
+
+export const initialDefaultItems = <T>(items: T[]): T[] => cloneItems(items)
 
 export const PAYMENT_METHODS = [
   'CB',
@@ -26,11 +39,11 @@ export const PAYMENT_METHODS = [
 ] as const
 
 export const DEFAULT_ACCOUNTS: Account[] = [
-  { id: 'cash', name: 'Espèces', type: 'cash', balance: 120 },
-  { id: 'current', name: 'Compte courant', type: 'bank', balance: 2380 },
-  { id: 'savings', name: 'Livret', type: 'savings', balance: 5100 },
-  { id: 'paypal', name: 'Paypal', type: 'paypal', balance: 240 },
-  { id: 'crypto', name: 'Crypto', type: 'crypto', balance: 650 }
+  { id: 'cash', name: 'Espèces', type: 'cash', balance: 0 },
+  { id: 'current', name: 'Compte courant', type: 'bank', balance: 0 },
+  { id: 'savings', name: 'Livret', type: 'savings', balance: 0 },
+  { id: 'paypal', name: 'Paypal', type: 'paypal', balance: 0 },
+  { id: 'crypto', name: 'Crypto', type: 'crypto', balance: 0 }
 ]
 
 export const DEFAULT_CATEGORIES: Category[] = [

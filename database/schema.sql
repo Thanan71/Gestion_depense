@@ -17,6 +17,20 @@ create table if not exists user_sessions (
   created_at timestamptz not null default now()
 );
 
+create table if not exists app_data_revisions (
+  user_id uuid primary key references app_users(id) on delete cascade,
+  revision_id text not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists app_data_backups (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  revision_id text,
+  snapshot jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists categories (
   id text primary key,
   user_id uuid references app_users(id) on delete cascade,
@@ -131,6 +145,7 @@ alter table settings add column if not exists user_id uuid references app_users(
 create unique index if not exists app_users_email_unique_idx on app_users(lower(email)) where email is not null;
 create index if not exists user_sessions_token_hash_idx on user_sessions(token_hash);
 create index if not exists user_sessions_user_id_idx on user_sessions(user_id);
+create index if not exists app_data_backups_user_created_idx on app_data_backups(user_id, created_at desc);
 
 create index if not exists transactions_user_kind_date_idx on transactions(user_id, kind, date desc);
 create index if not exists transactions_user_category_idx on transactions(user_id, category_id);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import dayjs from 'dayjs'
 import {
   Banknote,
   CalendarDays,
@@ -8,6 +9,7 @@ import {
   Target,
   WalletCards
 } from 'lucide-vue-next'
+import { computed } from 'vue'
 
 import StatisticCard from '@/components/common/cards/StatisticCard.vue'
 import BarChart from '@/components/common/charts/BarChart.vue'
@@ -18,10 +20,12 @@ import { useStatistics } from '@/composables/useStatistics'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { useExpenseStore } from '@/stores/useExpenseStore'
 import { useGoalStore } from '@/stores/useGoalStore'
+import { useIncomeStore } from '@/stores/useIncomeStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useSubscriptionStore } from '@/stores/useSubscriptionStore'
 
 const expenseStore = useExpenseStore()
+const incomeStore = useIncomeStore()
 const budgetStore = useBudgetStore()
 const goalStore = useGoalStore()
 const settingsStore = useSettingsStore()
@@ -30,17 +34,45 @@ const { formatCurrency } = useCurrency()
 const { monthlyExpenses, monthlyIncome, balance, budgetRemaining, budgetUsedPercent } =
   useStatistics()
 
-const monthlyEvolution = [
-  { label: 'Jan', value: 42 },
-  { label: 'Fév', value: 56 },
-  { label: 'Mar', value: 38 },
-  { label: 'Avr', value: 72 },
-  { label: 'Mai', value: 61 },
-  { label: 'Juin', value: budgetUsedPercent.value || 18 }
-]
+const monthFormatter = new Intl.DateTimeFormat(settingsStore.settings.locale, { month: 'short' })
+const monthlyEvolution = computed(() =>
+  Array.from({ length: 6 }, (_, index) => {
+    const month = dayjs().subtract(5 - index, 'month')
+    const monthKey = month.format('YYYY-MM')
 
-const chartLabels = monthlyEvolution.map((item) => item.label)
-const chartValues = monthlyEvolution.map((item) => item.value)
+    return {
+      label: monthFormatter.format(month.toDate()),
+      expenses: expenseStore.activeExpenses
+        .filter((expense) => expense.date.startsWith(monthKey))
+        .reduce((sum, expense) => sum + expense.amount, 0),
+      income: incomeStore.activeIncome
+        .filter((item) => item.date.startsWith(monthKey))
+        .reduce((sum, item) => sum + item.amount, 0)
+    }
+  })
+)
+const chartLabels = computed(() => monthlyEvolution.value.map((item) => item.label))
+const chartDatasets = computed(() => [
+  {
+    label: 'Dépenses',
+    values: monthlyEvolution.value.map((item) => item.expenses),
+    color: '#db2777'
+  },
+  {
+    label: 'Revenus',
+    values: monthlyEvolution.value.map((item) => item.income),
+    color: '#2563eb'
+  }
+])
+const currentMonthExpenses = computed(() => monthlyEvolution.value.at(-1)?.expenses ?? 0)
+const previousMonthExpenses = computed(() => monthlyEvolution.value.at(-2)?.expenses ?? 0)
+const expenseDeltaLabel = computed(() => {
+  const previous = previousMonthExpenses.value
+  const current = currentMonthExpenses.value
+  if (previous === 0) return current === 0 ? 'Stable' : 'Nouveau mois'
+  const delta = Math.round(((current - previous) / previous) * 100)
+  return `${delta >= 0 ? '+' : ''}${delta}% vs mois dernier`
+})
 const hasWidget = (widget: string) =>
   (settingsStore.settings.dashboardWidgets ?? []).includes(widget)
 </script>
@@ -80,7 +112,10 @@ const hasWidget = (widget: string) =>
 
     <section class="grid two">
       <DashboardCard v-if="hasWidget('chart')" title="Évolution mensuelle">
-        <BarChart :labels="chartLabels" :values="chartValues" />
+        <template #action>
+          <span class="badge">{{ expenseDeltaLabel }}</span>
+        </template>
+        <BarChart :labels="chartLabels" :datasets="chartDatasets" />
       </DashboardCard>
 
       <DashboardCard v-if="hasWidget('alerts')" title="Alertes">

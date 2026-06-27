@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import { Plus, Trash2, WalletCards } from 'lucide-vue-next'
-import { reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 
 import { useCurrency } from '@/composables/useCurrency'
-import { useStatistics } from '@/composables/useStatistics'
 import { useBudgetStore } from '@/stores/useBudgetStore'
 import { useCategoryStore } from '@/stores/useCategoryStore'
+import { useExpenseStore } from '@/stores/useExpenseStore'
 import type { BudgetPeriod } from '@/types/finance'
 
 const budgetStore = useBudgetStore()
 const categoryStore = useCategoryStore()
+const expenseStore = useExpenseStore()
 const { formatCurrency } = useCurrency()
-const { monthlyExpenses } = useStatistics()
 
 const form = reactive({
   name: '',
@@ -20,6 +20,50 @@ const form = reactive({
   categoryId: '',
   alertThreshold: 80
 })
+const periodFilter = ref<BudgetPeriod | 'all'>('all')
+
+const periodLabels: Record<BudgetPeriod, string> = {
+  weekly: 'Hebdomadaire',
+  monthly: 'Mensuel',
+  yearly: 'Annuel'
+}
+
+const visibleBudgets = computed(() =>
+  budgetStore.budgets.filter(
+    (budget) => periodFilter.value === 'all' || budget.period === periodFilter.value
+  )
+)
+
+const budgetRows = computed(() =>
+  visibleBudgets.value.map((budget) => {
+    const spent = budgetStore.spent(budget, expenseStore.activeExpenses, categoryStore.categories)
+    const usedPercent = budgetStore.usedPercentFor(
+      budget,
+      expenseStore.activeExpenses,
+      categoryStore.categories
+    )
+    const remaining = budget.amount - spent
+    const status =
+      usedPercent >= 100 ? 'danger' : usedPercent >= budget.alertThreshold ? 'warning' : 'ok'
+    const progressColor =
+      status === 'danger'
+        ? 'var(--danger)'
+        : status === 'warning'
+          ? 'var(--amber)'
+          : 'var(--primary)'
+
+    return {
+      budget,
+      spent,
+      remaining,
+      usedPercent,
+      progressColor,
+      categoryName: budget.categoryId
+        ? (categoryStore.byId(budget.categoryId)?.name ?? 'Catégorie inconnue')
+        : 'Global'
+    }
+  })
+)
 
 const addBudget = () => {
   if (!form.name.trim() || form.amount <= 0) return
@@ -33,6 +77,10 @@ const addBudget = () => {
   form.name = ''
   form.amount = 0
 }
+
+const removeBudget = (id: string) => {
+  if (window.confirm('Supprimer ce budget ?')) budgetStore.remove(id)
+}
 </script>
 
 <template>
@@ -42,6 +90,15 @@ const addBudget = () => {
         <h1>Budgets</h1>
         <p class="muted">Budgets mensuels, hebdomadaires, annuels, par catégorie et alertes.</p>
       </div>
+      <label class="field">
+        <span class="muted">Période</span>
+        <select v-model="periodFilter" class="select">
+          <option value="all">Toutes</option>
+          <option value="weekly">Hebdomadaire</option>
+          <option value="monthly">Mensuel</option>
+          <option value="yearly">Annuel</option>
+        </select>
+      </label>
     </div>
 
     <form class="card pad form-grid" @submit.prevent="addBudget">
@@ -83,20 +140,45 @@ const addBudget = () => {
     </form>
 
     <div class="grid two">
-      <article v-for="budget in budgetStore.budgets" :key="budget.id" class="card pad">
+      <article v-for="row in budgetRows" :key="row.budget.id" class="card pad">
         <div class="section-title">
-          <h2>{{ budget.name }}</h2>
+          <h2>{{ row.budget.name }}</h2>
           <div class="topbar-actions">
             <WalletCards :size="20" />
-            <button class="btn icon-btn danger" type="button" @click="budgetStore.remove(budget.id)">
+            <button class="btn icon-btn danger" type="button" @click="removeBudget(row.budget.id)">
               <Trash2 :size="16" />
             </button>
           </div>
         </div>
-        <strong class="metric-value">{{ formatCurrency(budget.amount) }}</strong>
-        <p class="muted">{{ budget.period }} · alerte à {{ budget.alertThreshold }}%</p>
+        <strong class="metric-value">{{ formatCurrency(row.budget.amount) }}</strong>
+        <p class="muted">
+          {{ periodLabels[row.budget.period] }} · {{ row.categoryName }} · alerte à
+          {{ row.budget.alertThreshold }}%
+        </p>
+        <div class="list" style="margin: 14px 0">
+          <div class="list-item">
+            <span>Dépensé</span>
+            <span />
+            <strong>{{ formatCurrency(row.spent) }}</strong>
+          </div>
+          <div class="list-item">
+            <span>Reste</span>
+            <span />
+            <strong>{{ formatCurrency(row.remaining) }}</strong>
+          </div>
+          <div class="list-item">
+            <span>Utilisé</span>
+            <span />
+            <strong>{{ row.usedPercent }}%</strong>
+          </div>
+        </div>
         <div class="progress">
-          <span :style="{ width: `${Math.min(budgetStore.usedPercent(monthlyExpenses), 100)}%` }" />
+          <span
+            :style="{
+              width: `${Math.min(row.usedPercent, 100)}%`,
+              background: row.progressColor
+            }"
+          />
         </div>
       </article>
     </div>

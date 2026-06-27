@@ -2,6 +2,17 @@ import pg from 'pg'
 
 const { Pool } = pg
 
+const sslConfig = () => {
+  const sslMode = process.env.DATABASE_SSL ?? 'true'
+  if (sslMode === 'false' || sslMode === 'disable') return false
+
+  const ca = process.env.DATABASE_CA_CERT?.replace(/\\n/g, '\n')
+  if (ca) return { ca, rejectUnauthorized: true }
+
+  const isProduction = process.env.NODE_ENV === 'production' || process.env.NETLIFY === 'true'
+  return { rejectUnauthorized: isProduction }
+}
+
 const createPool = (connectionString?: string) => {
   if (!connectionString) {
     throw new Error('Missing PostgreSQL connection string.')
@@ -9,7 +20,7 @@ const createPool = (connectionString?: string) => {
 
   return new Pool({
     connectionString,
-    ssl: { rejectUnauthorized: false },
+    ssl: sslConfig(),
     max: 3,
     idleTimeoutMillis: 10_000
   })

@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 
 import type { Debt } from '@/types/finance'
-import { DEFAULT_DEBTS } from '@/utils/constants'
+import { DEFAULT_DEBTS, initialDemoItems } from '@/utils/constants'
 import { createId, todayIso } from '@/utils/helpers'
 
 export const useDebtStore = defineStore('debts', {
   state: () => ({
-    debts: DEFAULT_DEBTS as Debt[]
+    debts: initialDemoItems(DEFAULT_DEBTS) as Debt[]
   }),
   getters: {
     owedByMe: (state) =>

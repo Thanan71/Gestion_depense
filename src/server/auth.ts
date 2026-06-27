@@ -7,6 +7,7 @@ import { getReadOnlyPool } from './database.js'
 
 const COOKIE_NAME = 'gd_session'
 const SESSION_DAYS = 30
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase()
 const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex')
@@ -88,6 +89,44 @@ export const requireUser = async (event: HandlerEvent) => {
   const user = await getUserFromEvent(event)
   if (!user) throw new Error('UNAUTHORIZED')
   return user
+}
+
+export const safeJsonParse = <T = Record<string, unknown>>(body?: string | null): T | null => {
+  try {
+    const value = JSON.parse(body ?? '{}') as unknown
+    return value && typeof value === 'object' ? (value as T) : null
+  } catch {
+    return null
+  }
+}
+
+export const isValidAuthEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
+export const isStrongPassword = (password: string) =>
+  password.length >= 8 && /[a-z]/i.test(password) && /\d/.test(password)
+
+const clientIp = (event: HandlerEvent) =>
+  event.headers['x-nf-client-connection-ip'] ??
+  event.headers['x-forwarded-for']?.split(',')[0]?.trim() ??
+  event.headers['client-ip'] ??
+  'unknown'
+
+export const rateLimitKey = (event: HandlerEvent, scope: string, identifier = '') =>
+  `${scope}:${clientIp(event)}:${identifier}`
+
+export const consumeRateLimit = (key: string, maxAttempts = 8, windowMs = 15 * 60 * 1000) => {
+  const now = Date.now()
+  const bucket = rateLimitBuckets.get(key)
+
+  if (!bucket || bucket.resetAt <= now) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs })
+    return true
+  }
+
+  if (bucket.count >= maxAttempts) return false
+
+  bucket.count += 1
+  return true
 }
 
 export const authJson = (statusCode: number, body: unknown, cookie?: string) => ({

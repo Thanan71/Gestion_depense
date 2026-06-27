@@ -2,6 +2,18 @@ import type { AppSnapshot, RemoteSyncResult } from '@/types/sync'
 
 const ENDPOINT = '/.netlify/functions/app-data'
 
+const parseResult = async (response: Response): Promise<RemoteSyncResult> => {
+  const payload = (await response.json().catch(() => null)) as RemoteSyncResult | null
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: payload?.message ?? `Remote sync failed: ${response.status}`
+    }
+  }
+
+  return payload ?? { ok: false, message: 'Remote sync returned an empty response.' }
+}
+
 export const remoteSyncService = {
   async pull(): Promise<RemoteSyncResult> {
     const response = await fetch(ENDPOINT, {
@@ -10,9 +22,7 @@ export const remoteSyncService = {
       credentials: 'include'
     })
 
-    if (!response.ok) return { ok: false, message: `Remote pull failed: ${response.status}` }
-
-    return (await response.json()) as RemoteSyncResult
+    return parseResult(response)
   },
 
   async push(snapshot: AppSnapshot): Promise<RemoteSyncResult> {
@@ -26,8 +36,6 @@ export const remoteSyncService = {
       body: JSON.stringify(snapshot)
     })
 
-    if (!response.ok) return { ok: false, message: `Remote push failed: ${response.status}` }
-
-    return (await response.json()) as RemoteSyncResult
+    return parseResult(response)
   }
 }

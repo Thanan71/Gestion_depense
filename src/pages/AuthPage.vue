@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LockKeyhole } from 'lucide-vue-next'
+import { Eye, EyeOff, LockKeyhole } from 'lucide-vue-next'
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/useAuthStore'
 const router = useRouter()
 const authStore = useAuthStore()
 const mode = ref<'login' | 'register'>('login')
+const showPassword = ref(false)
 const form = reactive({
   displayName: '',
   email: '',
@@ -15,6 +16,8 @@ const form = reactive({
 })
 
 const submit = async () => {
+  if (authStore.loading) return
+
   const ok =
     mode.value === 'login'
       ? await authStore.login(form.email, form.password)
@@ -27,7 +30,6 @@ const submit = async () => {
       }
     }
     await router.push('/')
-    window.location.reload()
   }
 }
 </script>
@@ -55,26 +57,48 @@ const submit = async () => {
         </label>
         <label class="field">
           <span>Mot de passe</span>
-          <input
-            v-model="form.password"
-            class="input"
-            autocomplete="current-password"
-            minlength="8"
-            type="password"
-            required
-          />
+          <span style="position: relative">
+            <input
+              v-model="form.password"
+              class="input"
+              :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
+              minlength="8"
+              pattern="(?=.*[A-Za-z])(?=.*[0-9]).{8,}"
+              title="8 caractères minimum, avec au moins une lettre et un chiffre."
+              :type="showPassword ? 'text' : 'password'"
+              style="padding-right: 44px"
+              required
+            />
+            <button
+              class="btn icon-btn"
+              type="button"
+              :title="showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'"
+              style="position: absolute; right: 1px; top: 1px; border: 0; box-shadow: none"
+              @click="showPassword = !showPassword"
+            >
+              <EyeOff v-if="showPassword" :size="18" />
+              <Eye v-else :size="18" />
+            </button>
+          </span>
         </label>
 
         <p v-if="authStore.error" class="muted" style="color: var(--danger)">
           {{ authStore.error }}
         </p>
 
-        <button class="btn primary" type="submit">
-          {{ mode === 'login' ? 'Se connecter' : "S'inscrire" }}
+        <button class="btn primary" type="submit" :disabled="authStore.loading">
+          {{
+            authStore.loading
+              ? 'Chargement...'
+              : mode === 'login'
+                ? 'Se connecter'
+                : "S'inscrire"
+          }}
         </button>
         <button
           class="btn"
           type="button"
+          :disabled="authStore.loading"
           @click="mode = mode === 'login' ? 'register' : 'login'"
         >
           {{ mode === 'login' ? 'Créer un compte' : 'J’ai déjà un compte' }}

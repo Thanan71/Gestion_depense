@@ -1,9 +1,14 @@
 import type { Handler } from '@netlify/functions'
+import type { PoolClient } from 'pg'
 
 import {
   authJson,
+  consumeRateLimit,
   createSession,
+  isValidAuthEmail,
   normalizeAuthEmail,
+  rateLimitKey,
+  safeJsonParse,
   sessionCookie,
   verifyPassword
 } from '../../src/server/auth.js'
@@ -14,12 +19,26 @@ export const handler: Handler = async (event) => {
     return authJson(405, { ok: false, message: 'Method not allowed.' })
   }
 
-  const payload = JSON.parse(event.body ?? '{}') as { email?: string; password?: string }
+  const payload = safeJsonParse<{ email?: string; password?: string }>(event.body)
+  if (!payload) {
+    return authJson(400, { ok: false, message: 'JSON invalide.' })
+  }
+
   const email = normalizeAuthEmail(payload.email ?? '')
   const password = payload.password ?? ''
-  const client = await getReadWritePool().connect()
+
+  if (!isValidAuthEmail(email) || !password) {
+    return authJson(400, { ok: false, message: 'Email ou mot de passe invalide.' })
+  }
+
+  if (!consumeRateLimit(rateLimitKey(event, 'login', email), 8)) {
+    return authJson(429, { ok: false, message: 'Trop de tentatives. Réessaie plus tard.' })
+  }
+
+  let client: PoolClient | undefined
 
   try {
+    client = await getReadWritePool().connect()
     const { rows } = await client.query<{
       id: string
       email: string
@@ -47,7 +66,10 @@ export const handler: Handler = async (event) => {
       },
       sessionCookie(session.token, session.expiresAt)
     )
+  } catch (error) {
+    console.error('Unable to login user', error)
+    return authJson(500, { ok: false, message: 'Connexion impossible.' })
   } finally {
-    client.release()
+    client?.release()
   }
 }

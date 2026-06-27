@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 
 import type { Subscription } from '@/types/finance'
-import { DEFAULT_SUBSCRIPTIONS } from '@/utils/constants'
+import { DEFAULT_SUBSCRIPTIONS, initialDemoItems } from '@/utils/constants'
 import { createId } from '@/utils/helpers'
 
 export const useSubscriptionStore = defineStore('subscriptions', {
   state: () => ({
-    subscriptions: DEFAULT_SUBSCRIPTIONS as Subscription[]
+    subscriptions: initialDemoItems(DEFAULT_SUBSCRIPTIONS) as Subscription[]
   }),
   getters: {
     monthlyTotal: (state) =>

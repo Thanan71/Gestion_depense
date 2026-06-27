@@ -2,7 +2,7 @@ import dayjs from 'dayjs'
 import { defineStore } from 'pinia'
 
 import type { Expense } from '@/types/finance'
-import { DEFAULT_EXPENSES } from '@/utils/constants'
+import { DEFAULT_EXPENSES, initialDemoItems } from '@/utils/constants'
 import { createId, currentTime, todayIso } from '@/utils/helpers'
 import { useNotificationStore } from './useNotificationStore'
 
@@ -10,7 +10,7 @@ export type ExpenseDraft = Omit<Expense, 'id' | 'kind' | 'archived' | 'createdAt
 
 export const useExpenseStore = defineStore('expenses', {
   state: () => ({
-    expenses: DEFAULT_EXPENSES as Expense[],
+    expenses: initialDemoItems(DEFAULT_EXPENSES) as Expense[],
     query: '',
     categoryFilter: 'all',
     periodFilter: 'month' as 'today' | 'week' | 'month' | 'year' | 'all'

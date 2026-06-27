@@ -19,6 +19,18 @@ const { monthlyExpenses, monthlyIncome, balance, budgetUsedPercent } = useStatis
 const series = computed(() =>
   statisticsService.monthlySeries(expenseStore.activeExpenses, incomeStore.activeIncome)
 )
+const chartDatasets = computed(() => [
+  {
+    label: 'Dépenses',
+    values: series.value.map((item) => item.expenses),
+    color: '#db2777'
+  },
+  {
+    label: 'Revenus',
+    values: series.value.map((item) => item.income),
+    color: '#2563eb'
+  }
+])
 const byCategory = computed(() => statisticsService.byCategory(expenseStore.activeExpenses))
 const categoryRows = computed(() =>
   Object.entries(byCategory.value)
@@ -64,7 +76,7 @@ const categoryRows = computed(() =>
         <div class="section-title">
           <h2>Évolution 6 mois</h2>
         </div>
-        <BarChart :labels="series.map((item) => item.label)" :values="series.map((item) => item.expenses)" />
+        <BarChart :labels="series.map((item) => item.label)" :datasets="chartDatasets" />
       </article>
 
       <article class="card pad">

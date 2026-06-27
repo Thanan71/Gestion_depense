@@ -3,6 +3,8 @@ import type { StateTree } from 'pinia'
 export interface AppSnapshot {
   version: number
   exportedAt: string
+  revisionId?: string | null
+  baseRevisionId?: string | null
   stores: Record<string, StateTree>
 }
 
@@ -11,4 +13,5 @@ export interface RemoteSyncResult {
   message?: string
   snapshot?: AppSnapshot
   savedAt?: string
+  revisionId?: string | null
 }

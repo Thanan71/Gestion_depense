@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 
 import type { Category } from '@/types/finance'
-import { DEFAULT_CATEGORIES } from '@/utils/constants'
+import { DEFAULT_CATEGORIES, initialDefaultItems } from '@/utils/constants'
 import { createId } from '@/utils/helpers'
 
 export const useCategoryStore = defineStore('categories', {
   state: () => ({
-    categories: DEFAULT_CATEGORIES as Category[]
+    categories: initialDefaultItems(DEFAULT_CATEGORIES) as Category[]
   }),
   getters: {
     byId: (state) => (id?: string) => state.categories.find((category) => category.id === id),

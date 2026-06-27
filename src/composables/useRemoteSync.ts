@@ -30,9 +30,10 @@ const trackedStores = (): StoreGeneric[] => [
   useAccountStore()
 ]
 
-const createSnapshot = (stores: StoreGeneric[]): AppSnapshot => ({
-  version: 1,
+const createSnapshot = (stores: StoreGeneric[], baseRevisionId: string | null): AppSnapshot => ({
+  version: 2,
   exportedAt: new Date().toISOString(),
+  baseRevisionId,
   stores: Object.fromEntries(
     stores.map((store) => [store.$id, JSON.parse(JSON.stringify(store.$state))])
   )
@@ -44,6 +45,7 @@ export const useRemoteSync = () => {
   const authStore = useAuthStore()
 
   let stopStoreWatcher: (() => void) | undefined
+  let remoteRevisionId: string | null = null
 
   const startSync = async () => {
     if (!SYNC_ENABLED || SYNC_PROVIDER !== 'postgres' || !authStore.user) return
@@ -54,6 +56,7 @@ export const useRemoteSync = () => {
     try {
       const pulled = await remoteSyncService.pull()
       if (!pulled.ok) throw new Error(pulled.message ?? 'Remote sync failed.')
+      remoteRevisionId = pulled.snapshot?.revisionId ?? pulled.revisionId ?? null
 
       if (pulled.snapshot?.stores) {
         for (const store of stores) {
@@ -61,7 +64,9 @@ export const useRemoteSync = () => {
           if (savedState) store.$patch(savedState)
         }
       } else {
-        await remoteSyncService.push(createSnapshot(stores))
+        const pushed = await remoteSyncService.push(createSnapshot(stores, remoteRevisionId))
+        if (!pushed.ok) throw new Error(pushed.message ?? 'Remote sync failed.')
+        remoteRevisionId = pushed.revisionId ?? null
       }
 
       await nextTick()
@@ -74,8 +79,9 @@ export const useRemoteSync = () => {
           window.clearTimeout(timeout)
           timeout = window.setTimeout(async () => {
             try {
-              const pushed = await remoteSyncService.push(createSnapshot(stores))
+              const pushed = await remoteSyncService.push(createSnapshot(stores, remoteRevisionId))
               status.value = pushed.ok ? 'synced' : 'error'
+              if (pushed.ok) remoteRevisionId = pushed.revisionId ?? null
             } catch {
               status.value = 'offline'
             }

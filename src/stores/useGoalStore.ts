@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 
 import type { Goal } from '@/types/finance'
-import { DEFAULT_GOALS } from '@/utils/constants'
+import { DEFAULT_GOALS, initialDemoItems } from '@/utils/constants'
 import { clamp, createId } from '@/utils/helpers'
 
 export const useGoalStore = defineStore('goals', {
   state: () => ({
-    goals: DEFAULT_GOALS as Goal[]
+    goals: initialDemoItems(DEFAULT_GOALS) as Goal[]
   }),
   getters: {
     progress: () => (goal: Goal) =>

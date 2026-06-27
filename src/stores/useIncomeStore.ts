@@ -2,14 +2,14 @@ import dayjs from 'dayjs'
 import { defineStore } from 'pinia'
 
 import type { Income } from '@/types/finance'
-import { DEFAULT_INCOME } from '@/utils/constants'
+import { DEFAULT_INCOME, initialDemoItems } from '@/utils/constants'
 import { createId, currentTime, todayIso } from '@/utils/helpers'
 
 export type IncomeDraft = Omit<Income, 'id' | 'kind' | 'archived' | 'createdAt' | 'updatedAt'>
 
 export const useIncomeStore = defineStore('income', {
   state: () => ({
-    income: DEFAULT_INCOME as Income[]
+    income: initialDemoItems(DEFAULT_INCOME) as Income[]
   }),
   getters: {
     activeIncome: (state) => state.income.filter((item) => !item.archived),
